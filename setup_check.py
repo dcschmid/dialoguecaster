@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Project status & setup check (Chatterbox edition)
+"""Project status & setup check (Supertonic edition)
 ====================================================
 
-Verifies basic structure & dependencies for the local Chatterbox TTS pipeline.
+Verifies basic structure & dependencies for the local Supertonic ONNX pipeline.
 """
 
 import os
@@ -14,11 +14,10 @@ def check_project_structure():
     print("=" * 50)
     
     required_files = [
-        "chatterbox_tts.py",
+        "generate_podcast.py",
         "requirements.txt",
         "README.md",
         "LICENSE",
-        ".env.example",
     ]
     
     missing_files = []
@@ -31,7 +30,7 @@ def check_project_structure():
             missing_files.append(file_path)
     
     print("\n📁 DIRECTORIES:")
-    directories = ["examples", "output"]
+    directories = ["podscripts", "output"]
     
     for directory in directories:
         if os.path.exists(directory):
@@ -61,7 +60,8 @@ def check_dependencies():
         ("pydub", "Audio Processing"),
         ("dotenv", "Environment Variables"),
         ("numpy", "Scientific Computing"),
-        ("torch", "PyTorch (optional GPU)"),
+        ("supertonic", "Supertonic TTS"),
+        ("onnxruntime", "ONNX Runtime (CPU backend)"),
     ]
     
     missing_deps = []
@@ -98,14 +98,14 @@ def show_quick_start():
     print("   cp .env.example .env  # optional defaults only")
     print()
     print("4. Mock test (no model download):")
-    print("   python chatterbox_tts.py podscripts/classic-rock/classic-rock.md --language de --mock --output-dir out_test")
+    print("   python generate_podcast.py podscripts/decades/1980s.md --language en --mock --output-dir out_test")
     print()
-    print("5. Real synthesis (first run downloads weights):")
-    print("   python chatterbox_tts.py podscripts/classic-rock/classic-rock.md --language de --output-dir out_real")
+    print("5. Real synthesis (first run downloads Supertonic models automatically):")
+    print("   python generate_podcast.py podscripts/decades/1980s.md --language en --output-dir out_real")
 
 def main():
     """Entry point."""
-    print("🎙️ CHATTERBOX PODCAST TTS - PROJECT STATUS")
+    print("🎙️ PODCAST TTS - PROJECT STATUS (SUPERTONIC)")
     print("=" * 60)
     
     structure_ok = check_project_structure()

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Operational guide for coding agents. Focus: deterministic, safe generation of podcast audio (Chatterbox TTS) from Markdown.
+Operational guide for coding agents. Focus: deterministic, safe generation of podcast audio (Piper TTS) from Markdown.
 
 ---
 
@@ -15,11 +15,12 @@ Primary script:
 
 Technologies:
 
-- Python 3.9+ (3.11 preferred)
-- Chatterbox (local multilingual TTS)
-- PyTorch / torchaudio
+- Python 3.9+ (3.11.x preferred)
+- Piper (`piper-tts` from PyPI) using ONNX Runtime (`onnxruntime` / `onnxruntime-gpu`)
+- Optional OpenVoice V2 backend (ToneColorConverter + MeloTTS, PyTorch)
 - Pydub + FFmpeg
-- Local bundled voice/style prompt clips for all supported languages (male & female) in `voices/`
+- Optional per-speaker Piper speaker-id overrides via `--speaker-ids-json`
+- Optional per-speaker voice assignments via `--speaker-voices-json` (defaults to `voices/speaker_voices.json` when present)
 
 Outputs (default-on features below can be disabled with `--no-*` flags):
 
@@ -36,13 +37,18 @@ Outputs (default-on features below can be disabled with `--no-*` flags):
 python -m venv podcast-tts-env
 source podcast-tts-env/bin/activate
 pip install -r requirements.txt
+# Optional OpenVoice backend
+pip install -r requirements-openvoice.txt
+# Download checkpoints_v2_0417.zip (OpenVoice docs) → unzip to checkpoints_v2/
 ```
 
 Optional `.env` (no secrets). Then quick test:
 
 ```bash
-python chatterbox_tts.py podscripts/classic-rock/classic-rock.md --language de --mock --output-dir out_test
+python chatterbox_tts.py podscripts/classic-rock/classic-rock.md --language en --mock --output-dir out_test
 ```
+
+Drop downloaded Piper voices (`*.onnx` + `.onnx.json`) into `voices/`. The repo contains `voices/speaker_voices.json` which already maps `daniel` → Ryan and `annabelle` → Cori; extend the file for additional hosts or pass a different JSON via `--speaker-voices-json`.
 
 FFmpeg prüfen:
 
@@ -58,7 +64,6 @@ If FFmpeg missing: inform user (do not auto‑install).
 
 - Comments / logs now in English (legacy German allowed temporarily during transition).
 - No external API keys (Speechify removed).
-- Speaker mapping consistent: `daniel/annabelle` available in default mapping per language.
 - Do not re‑segment artificially; keep original granularity.
 
 ---
@@ -108,7 +113,7 @@ Test cases:
 - Speaker names with umlauts
 - Empty lines / multiple blank lines
 - Colon inside sentence (not a speaker)
-- Custom `--speakers` mapping
+- Multiple speaker names (ensure `[S1]/[S2]` assignment)
 - VTT timing with synthetic lengths
 
 ---
@@ -156,8 +161,8 @@ For modifications in `chatterbox_tts.py`:
 | Umlaut names | Detected |
 | Blank lines | Segment termination |
 | Colon inside sentence | No speaker switch |
-| Missing local prompts (de) | Continue without prompt (warn) |
-| Duplicate mapping entry | Last wins |
+| Missing speaker-id mapping | Continue with default Piper speaker id (0 or None) |
+| >2 unique speakers | Additional names reuse `[S1]` tag |
 
 ---
 
@@ -165,16 +170,43 @@ For modifications in `chatterbox_tts.py`:
 
 ```bash
 # Basic (structured output + segment WAVs + WAV export all ON by default)
-python chatterbox_tts.py file.md --language de --output-dir out
+python chatterbox_tts.py file.md --language en \
+  --piper-voice /voices/en_US-lessac-medium.onnx \
+  --output-dir out
+
+# Map fixed speakers to Piper speaker IDs
+python chatterbox_tts.py file.md --language en \
+  --piper-voice /voices/en_US-lessac-medium.onnx \
+  --speaker-ids-json voices/speakers.json \
+  --output-dir out_named
+
+Note: In this Kokoro-focused repo the CLI now defaults to Kokoro with sensible defaults:
+`--tts-backend kokoro --kokoro-lang-code b --kokoro-voices-json kokoro_voices.json --kokoro-device cuda`
+
+# GPU accelerated run with tweaked length scale
+python chatterbox_tts.py file.md --language en \
+  --piper-voice /voices/en_US-lessac-medium.onnx \
+  --piper-use-cuda \
+  --piper-length-scale 0.95 \
+  --output-dir out_gpu
 
 # Disable structured layout & segment WAVs
-python chatterbox_tts.py file.md --language de --no-structured-output --no-save-segments-wav --output-dir out_flat
+python chatterbox_tts.py file.md --language en --no-structured-output --no-save-segments-wav --output-dir out_flat
 
 # CPU mock test (fast CI)
 python chatterbox_tts.py file.md --language en --mock --output-dir out_mock
 
 # Suppress default warning suppression (show all warnings)
 python chatterbox_tts.py file.md --language en --no-suppress-warnings --output-dir out_verbose
+
+# Reuse cached segments (delete individual WAVs to force regeneration)
+python chatterbox_tts.py file.md --language en --reuse-existing-segments --output-dir out_cached
+
+# OpenVoice V2 (reference audio cloning)
+python chatterbox_tts.py file.md --language en --tts-backend openvoice \
+  --openvoice-reference voices/reference.wav \
+  --openvoice-checkpoints checkpoints_v2 \
+  --output-dir out_openvoice
 ```
 
 ---
@@ -193,7 +225,7 @@ python chatterbox_tts.py file.md --language en --no-suppress-warnings --output-d
 - Loudness normalization (EBU R128)
 - Multi‑file batch CLI
 - Automatic silence trimming
-- Abstract alternative models (XTTS v2)
+- Abstract alternative Piper checkpoints / future releases
 - Per‑speaker pause & style parameters
 
 ---

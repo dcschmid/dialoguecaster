@@ -1,32 +1,27 @@
-# Deutsche Podcast TTS - Open Source (Chatterbox) Multilingual Pipeline
-# Fokus: Markdown -> Segmente -> Chatterbox TTS -> MP3/VTT
+# ==========================
+# Melody Mind - Supertonic TTS
+# ==========================
 
-# Audio Processing für MP3/WAV Export
+# --- CORE ---
+supertonic>=1.0.0
+onnxruntime>=1.23.1
+numpy>=1.24.0,<3
+
+# --- AUDIO PROCESSING ---
 pydub>=0.25.1
+soundfile>=0.12.1,<0.14
+librosa>=0.10.1,<0.12
 
-# Audio Processing Support
-# Hinweis: `audioop` ist in Python <=3.12 Teil der Standardbibliothek.
-# Das Paket `audioop-lts` ist nur für Python >=3.13 notwendig und würde
-# ältere Python-Versionen beim Installieren blockieren. Daher entfernt.
+# --- IMAGE / COVER HANDLING ---
+Pillow>=11.0.0,<12.0.0
 
-# Image Processing (cover optimization)
-Pillow>=10.0.0
-
-# Scientific Computing
-numpy>=1.24.0
-
-# Audio Analysis and Processing
-librosa>=0.10.1
-soundfile>=0.12.1
-
+# --- UTILITIES ---
 python-dotenv>=1.0.0
 requests>=2.31.0
-
-# JSON und Web-Interface Support
-flask>=2.3.0
-
-# Utilities
 tqdm>=4.64.0
 
-# Optional: Development und Testing
+# --- OPTIONAL (WEB UI / TOOLS) ---
+flask>=2.3.0
+
+# --- TESTING (OPTIONAL) ---
 pytest>=7.0.0

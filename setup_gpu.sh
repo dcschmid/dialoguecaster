@@ -1,20 +1,20 @@
 #!/bin/bash
 
-# GPU Setup Script for Markdown-to-Podcast TTS
-# Automatically detects GPU and installs correct PyTorch version
+# GPU Setup Script for Piper / Markdown-to-Podcast
+# Installs CUDA-enabled onnxruntime-gpu and verifies that Piper can access the CUDA provider.
 
-set -e
+set -euo pipefail
 
 echo "=========================================="
-echo "GPU Setup for Markdown-to-Podcast TTS"
+echo "GPU Setup for Piper (onnxruntime-gpu)"
 echo "=========================================="
 echo ""
 
 # Check if virtual environment is activated
-if [[ -z "$VIRTUAL_ENV" ]]; then
+if [[ -z "${VIRTUAL_ENV:-}" ]]; then
     echo "❌ Error: No virtual environment detected."
     echo ""
-    echo "Please activate your virtual environment first:"
+    echo "Please activate your environment first, e.g.:"
     echo "  source podcast-tts-env/bin/activate"
     echo ""
     exit 1
@@ -24,75 +24,38 @@ echo "✓ Virtual environment active: $VIRTUAL_ENV"
 echo ""
 
 # Check if nvidia-smi is available
-if ! command -v nvidia-smi &> /dev/null; then
+if ! command -v nvidia-smi >/dev/null 2>&1; then
     echo "⚠️  Warning: nvidia-smi not found."
     echo ""
     echo "This means either:"
-    echo "  1. You don't have an NVIDIA GPU"
+    echo "  1. No NVIDIA GPU is available, or"
     echo "  2. NVIDIA drivers are not installed"
     echo ""
-    echo "Installing CPU-only PyTorch..."
-    pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
+    echo "Installing CPU-only onnxruntime..."
+    pip install --upgrade onnxruntime piper-tts
     echo ""
-    echo "✓ CPU-only PyTorch installed."
-    echo "  Use: python chatterbox_tts.py script.md --language en --device cpu"
+    echo "✓ CPU-only runtime installed."
+    echo "  Run: python chatterbox_tts.py script.md --mock --output-dir out_mock"
     exit 0
 fi
 
 echo "✓ NVIDIA GPU detected"
 echo ""
 
-# Get GPU info
+# GPU info
 GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -n 1)
-COMPUTE_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n 1)
 CUDA_VERSION=$(nvidia-smi | grep "CUDA Version" | awk '{print $9}')
+DRIVER_VERSION=$(nvidia-smi | grep "Driver Version" | awk '{print $3}')
 
 echo "GPU Information:"
-echo "  Name: $GPU_NAME"
-echo "  Compute Capability: $COMPUTE_CAP"
-echo "  CUDA Driver Version: $CUDA_VERSION"
+echo "  Name:           $GPU_NAME"
+echo "  Driver Version: $DRIVER_VERSION"
+echo "  CUDA Version:   $CUDA_VERSION"
 echo ""
 
-# Determine PyTorch version based on compute capability
-MAJOR=$(echo "$COMPUTE_CAP" | cut -d. -f1)
-MINOR=$(echo "$COMPUTE_CAP" | cut -d. -f2)
-
-# Convert to integer for comparison
-COMPUTE_INT=$((MAJOR * 10 + MINOR))
-
-if [ "$COMPUTE_INT" -ge 120 ]; then
-    # Blackwell (RTX 50xx series) - requires CUDA 13.0
-    CUDA_INDEX="cu130"
-    CUDA_NAME="13.0"
-    ARCH="Blackwell (sm_120+)"
-elif [ "$COMPUTE_INT" -ge 89 ]; then
-    # Ada Lovelace (RTX 40xx series)
-    CUDA_INDEX="cu124"
-    CUDA_NAME="12.4"
-    ARCH="Ada Lovelace (sm_89)"
-elif [ "$COMPUTE_INT" -ge 86 ]; then
-    # Ampere (RTX 30xx series)
-    CUDA_INDEX="cu124"
-    CUDA_NAME="12.4"
-    ARCH="Ampere (sm_86)"
-elif [ "$COMPUTE_INT" -ge 75 ]; then
-    # Turing (RTX 20xx, GTX 16xx series)
-    CUDA_INDEX="cu121"
-    CUDA_NAME="12.1"
-    ARCH="Turing (sm_75)"
-else
-    # Older architectures
-    CUDA_INDEX="cu121"
-    CUDA_NAME="12.1"
-    ARCH="Legacy (sm_$COMPUTE_CAP)"
-fi
-
-echo "Detected Architecture: $ARCH"
-echo "Selected PyTorch CUDA Version: $CUDA_NAME ($CUDA_INDEX)"
+echo "The PyPI onnxruntime-gpu wheels target CUDA 12.2+. Keep drivers up-to-date (>= 525.xx)."
 echo ""
-
-# Ask for confirmation
-read -p "Install PyTorch with CUDA $CUDA_NAME support? (y/n) " -n 1 -r
+read -p "Install/upgrade onnxruntime-gpu now? (y/n) " -n 1 -r
 echo ""
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo "Installation cancelled."
@@ -100,44 +63,33 @@ if [[ ! $REPLY =~ ^[Yy]$ ]]; then
 fi
 
 echo ""
-echo "Installing PyTorch with CUDA $CUDA_NAME..."
-echo "Command: pip install --upgrade torch torchaudio --index-url https://download.pytorch.org/whl/$CUDA_INDEX"
-echo ""
-
-pip install --upgrade torch torchaudio --index-url "https://download.pytorch.org/whl/$CUDA_INDEX"
+echo "Installing CUDA-enabled onnxruntime..."
+pip install --upgrade onnxruntime-gpu piper-tts
 
 echo ""
 echo "=========================================="
-echo "Verifying Installation..."
+echo "Verifying CUDA provider..."
 echo "=========================================="
 echo ""
 
-# Verify installation
-python3 << 'EOF'
-import torch
+python3 <<'EOF'
 import sys
+import onnxruntime as ort
 
-print(f"PyTorch Version: {torch.__version__}")
-print(f"CUDA Available: {torch.cuda.is_available()}")
+providers = ort.get_available_providers()
+print("Available providers:", providers)
 
-if torch.cuda.is_available():
-    print(f"CUDA Version: {torch.version.cuda}")
-    print(f"GPU Device: {torch.cuda.get_device_name(0)}")
-    print(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
-    
-    # Test basic CUDA operation
-    try:
-        x = torch.randn(100, 100).cuda()
-        y = torch.matmul(x, x)
-        print("\n✓ CUDA tensor operations working correctly")
-        sys.exit(0)
-    except Exception as e:
-        print(f"\n❌ CUDA test failed: {e}")
-        sys.exit(1)
-else:
-    print("\n⚠️  Warning: CUDA is not available")
-    print("PyTorch will run on CPU only")
+if "CUDAExecutionProvider" not in providers:
+    print("\n❌ CUDA provider missing – ensure the NVIDIA driver is >= 525.xx and reinstall onnxruntime-gpu.")
     sys.exit(1)
+
+try:
+    from piper import PiperVoice
+except ImportError as err:
+    print(f"\n⚠️ Piper not installed: {err}")
+    sys.exit(2)
+
+print("\n✓ CUDA provider detected. Piper can now run with --piper-use-cuda.")
 EOF
 
 VERIFY_STATUS=$?
@@ -148,23 +100,21 @@ if [ $VERIFY_STATUS -eq 0 ]; then
     echo "✓ GPU Setup Complete!"
     echo "=========================================="
     echo ""
-    echo "You can now use GPU acceleration:"
-    echo "  python chatterbox_tts.py script.md --language en --device cuda --output-dir output"
+    echo "Run Piper with GPU acceleration via:"
+    echo "  python chatterbox_tts.py script.md --piper-voice /path/to/voice.onnx --piper-use-cuda --output-dir output"
     echo ""
-    echo "For more details, see GPU_SETUP.md"
+    echo "Need a voice? Download one with:"
+    echo "  python -m piper.download_voices en_US-lessac-medium"
+elif [ $VERIFY_STATUS -eq 2 ]; then
+    echo "Install piper-tts manually via 'pip install --upgrade piper-tts' and rerun this script."
 else
     echo "=========================================="
     echo "❌ GPU Setup Failed"
     echo "=========================================="
     echo ""
     echo "Possible issues:"
-    echo "  1. CUDA drivers need updating"
-    echo "  2. GPU not supported by this PyTorch version"
-    echo "  3. System restart required after driver install"
-    echo ""
-    echo "Fallback to CPU mode:"
-    echo "  python chatterbox_tts.py script.md --language en --device cpu --output-dir output"
-    echo ""
-    echo "For troubleshooting, see GPU_SETUP.md"
+    echo "  - Driver too old for CUDA 12.2 wheels"
+    echo "  - Multiple Python versions active (verify your venv)"
+    echo "  - onnxruntime-gpu install failed (check pip output)"
     exit 1
 fi
