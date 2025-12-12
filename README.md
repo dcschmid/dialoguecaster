@@ -37,6 +37,8 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+Fast path: run `./setup_supertonic.sh` (creates venv `supertonic_env` and installs dependencies).
+
 ---
 
 ## 4. Quick Smoke Test (mock)
@@ -80,9 +82,26 @@ Reuse or disable segment caching:
 - Force regeneration: add `--no-reuse-existing-segments`.
 - Skip segment WAVs entirely: add `--no-save-segments-wav`.
 
+Change which speaker names use the default male/female voices via:
+
+```bash
+--male-aliases "daniel,male,host" --female-aliases "annabelle,female,guest"
+```
+
 ---
 
-## 6. Markdown Dialogue Format
+## 6. Available Supertonic Voices
+
+Supertonic voice styles are documented here: https://supertone-inc.github.io/supertonic-py/voices/
+
+- Male voices: `M1`, `M2`, `M3`, `M4`, `M5`
+- Female voices: `F1`, `F2`, `F3`, `F4`, `F5`
+
+Defaults in this repo: `M3` (male/unknown) and `F3` (female).
+
+---
+
+## 7. Markdown Dialogue Format
 
 ```
 daniel: Welcome back to Melody Mind!
@@ -95,7 +114,7 @@ annabelle: Today we're exploring female vocal icons.
 
 ---
 
-## 7. Output Layout (structured default)
+## 8. Output Layout (structured default)
 
 With `--structured-output` (default):
 
@@ -116,13 +135,15 @@ Without structured output: final files in `--output-dir`, segment WAVs in `segme
 
 ---
 
-## 8. Common Flags
+## 9. Common Flags
 
 | Flag | Description |
 |------|-------------|
 | `--pause-ms` | Silence between dialogue segments (default 600) |
 | `--supertonic-voice` | Default voice style for unknown/male speakers (default `M3`) |
 | `--supertonic-female-voice` | Fallback voice for female speakers (default `F3`) |
+| `--male-aliases` | Comma-separated speaker names mapped to the default male voice (default `daniel,male,host`) |
+| `--female-aliases` | Comma-separated speaker names mapped to the default female voice (default `annabelle,female,guest`) |
 | `--supertonic-voices-json` | JSON mapping speaker → voice style |
 | `--supertonic-speed` | Speed multiplier (default `1.05`) |
 | `--supertonic-steps` | Denoising steps `1–100` (default `5`) |
@@ -134,7 +155,7 @@ Without structured output: final files in `--output-dir`, segment WAVs in `segme
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 | Issue | Fix |
 |-------|-----|
@@ -146,7 +167,7 @@ Without structured output: final files in `--output-dir`, segment WAVs in `segme
 
 ---
 
-## 10. Project Structure
+## 11. Project Structure
 
 ```
 generate_podcast.py      # Main CLI for Supertonic synthesis

@@ -5,11 +5,11 @@
 Standalone script using Supertonic to convert
 Markdown dialogue scripts into audio (WAV/MP3) plus WebVTT subtitles.
 
-- 100% lokal, mit Supertonic (ONNX Runtime)
-- Sprache: Englisch (Standard)
-- Dialogformat: "Name: Text" pro Zeile
-- Konfigurierbare Pausen zwischen Segmenten
-- Outputs: MP3 + .vtt (+ optional per-segment WAV; Intro/Outro-Musik unterstützt)
+- 100% local with Supertonic (ONNX Runtime)
+- Language: English (default)
+- Dialogue format: "Name: Text" per line
+- Configurable pauses between segments
+- Outputs: MP3 + .vtt (+ optional per-segment WAV; intro/outro music supported)
 """
 
 from __future__ import annotations
@@ -65,6 +65,8 @@ MIN_PYTHON = (3, 11, 0)
 SUPERTONIC_SAMPLE_RATE_FALLBACK = 24000
 DEFAULT_MALE_VOICE = "M3"
 DEFAULT_FEMALE_VOICE = "F3"
+DEFAULT_MALE_ALIASES = ["daniel", "male", "host"]
+DEFAULT_FEMALE_ALIASES = ["annabelle", "female", "guest"]
 
 # Regex: speaker line "Name: Text"
 SPEAKER_LINE = re.compile(r"^([A-Za-z0-9_ÄÖÜäöüß\- ]{1,40}):\s*(.*)$")
@@ -160,18 +162,24 @@ def build_speaker_mapping(
     overrides: Optional[Dict[str, str]],
     default_male: str = DEFAULT_MALE_VOICE,
     default_female: str = DEFAULT_FEMALE_VOICE,
+    male_aliases: Optional[List[str]] = None,
+    female_aliases: Optional[List[str]] = None,
 ) -> Dict[str, str]:
     """Return speaker -> Supertonic voice style mapping with sensible defaults."""
     default_male = (default_male or DEFAULT_MALE_VOICE).upper()
     default_female = (default_female or DEFAULT_FEMALE_VOICE).upper()
-    mapping: Dict[str, str] = {
-        "daniel": default_male,
-        "annabelle": default_female,
-        "male": default_male,
-        "female": default_female,
-        "host": default_male,
-        "guest": default_female,
-    }
+    male_aliases = male_aliases or DEFAULT_MALE_ALIASES
+    female_aliases = female_aliases or DEFAULT_FEMALE_ALIASES
+
+    mapping: Dict[str, str] = {}
+    mapping["_default_male"] = default_male
+    mapping["_default_female"] = default_female
+    for alias in male_aliases:
+        if alias:
+            mapping[alias.lower()] = default_male
+    for alias in female_aliases:
+        if alias:
+            mapping[alias.lower()] = default_female
     if overrides:
         for key, value in overrides.items():
             if isinstance(key, str) and isinstance(value, str) and value.strip():
@@ -182,8 +190,8 @@ def build_speaker_mapping(
 def derive_speaker_key(name: str, mapping: Dict[str, str]) -> str:
     """Pick a voice style for a given speaker name using mapping + simple heuristics."""
     normalized = (name or "").strip().lower()
-    male_default = mapping.get("male", mapping.get("daniel", DEFAULT_MALE_VOICE))
-    female_default = mapping.get("female", mapping.get("annabelle", DEFAULT_FEMALE_VOICE))
+    male_default = mapping.get("male", mapping.get("_default_male", DEFAULT_MALE_VOICE))
+    female_default = mapping.get("female", mapping.get("_default_female", DEFAULT_FEMALE_VOICE))
     if normalized in mapping:
         return mapping[normalized]
 
@@ -197,6 +205,18 @@ def derive_speaker_key(name: str, mapping: Dict[str, str]) -> str:
 
     # Default fallback to male voice for unknowns
     return male_default
+
+
+def parse_aliases(raw: Optional[str], defaults: List[str]) -> List[str]:
+    """Convert a comma-separated alias string into a clean list."""
+    if raw is None:
+        return defaults
+    aliases: List[str] = []
+    for part in raw.split(","):
+        cleaned = part.strip()
+        if cleaned:
+            aliases.append(cleaned)
+    return aliases or defaults
 
 
 class SupertonicSynthesizer:
@@ -332,7 +352,7 @@ def export_webvtt(segments: List[Segment], path: Path):
         secs = ts % 60
         return f"{hours:02d}:{minutes:02d}:{secs:06.3f}".replace(".", ",")
 
-    # optional Intro/Outro-Länge
+    # optional intro/outro duration
     intro_duration = getattr(export_webvtt, "intro_duration", 0.0)
     outro_duration = getattr(export_webvtt, "outro_duration", 0.0)
 
@@ -342,7 +362,7 @@ def export_webvtt(segments: List[Segment], path: Path):
         if intro_duration > 0.0:
             f.write(f"{idx}\n")
             f.write(f"00:00:00,000 --> {fmt(intro_duration)}\n")
-            f.write(f"<v Musik>Intro-Musik\n\n")
+            f.write(f"<v Music>Intro music\n\n")
             idx += 1
         for seg in segments:
             f.write(f"{idx}\n")
@@ -357,7 +377,7 @@ def export_webvtt(segments: List[Segment], path: Path):
             last_end = segments[-1].end + intro_duration if segments else intro_duration
             f.write(f"{idx}\n")
             f.write(f"{fmt(last_end)} --> {fmt(last_end + outro_duration)}\n")
-            f.write(f"<v Musik>Outro-Musik\n\n")
+            f.write(f"<v Music>Outro music\n\n")
 
 
 def main():
@@ -396,7 +416,7 @@ def main():
         "--output-prefix", default=None, help="Optional base name (default: input stem)"
     )
     parser.add_argument(
-        "--pause-ms", type=int, default=600, help="Pause (ms) zwischen Segmenten"
+        "--pause-ms", type=int, default=600, help="Pause between segments (ms)"
     )
     parser.add_argument(
         "--mock", action="store_true", help="Force mock (no real synthesis, silence)"
@@ -416,6 +436,16 @@ def main():
         "--supertonic-female-voice",
         default=DEFAULT_FEMALE_VOICE,
         help="Fallback voice style for female speakers (default: F3)",
+    )
+    parser.add_argument(
+        "--male-aliases",
+        default=",".join(DEFAULT_MALE_ALIASES),
+        help="Comma-separated speaker names mapped to the default male voice (default: daniel,male,host)",
+    )
+    parser.add_argument(
+        "--female-aliases",
+        default=",".join(DEFAULT_FEMALE_ALIASES),
+        help="Comma-separated speaker names mapped to the default female voice (default: annabelle,female,guest)",
     )
     parser.add_argument(
         "--supertonic-voices-json",
@@ -582,11 +612,16 @@ def main():
         logger.error("%s", err)
         return 1
 
+    male_aliases = parse_aliases(args.male_aliases, DEFAULT_MALE_ALIASES)
+    female_aliases = parse_aliases(args.female_aliases, DEFAULT_FEMALE_ALIASES)
+
     speaker_voice_map = build_speaker_mapping(
         language,
         supertonic_voice_map,
         default_male=default_voice,
         default_female=default_female_voice,
+        male_aliases=male_aliases,
+        female_aliases=female_aliases,
     )
 
     if not HAS_SUPERTONIC and not args.mock:
