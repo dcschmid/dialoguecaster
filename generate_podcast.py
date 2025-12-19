@@ -19,6 +19,7 @@ import os
 import shutil
 import sys
 import re
+import random
 import logging
 import warnings
 from dataclasses import dataclass
@@ -157,6 +158,34 @@ def load_speaker_voice_map(path_str: Optional[str], required: bool = False) -> D
     return result
 
 
+def load_speaker_speed_map(path_str: Optional[str]) -> Dict[str, float]:
+    """JSON: { "daniel": 0.94, "annabelle": 0.92 }"""
+    if not path_str:
+        return {}
+    path = Path(path_str)
+    if not path.exists():
+        raise FileNotFoundError(f"Supertonic speed JSON missing: {path}")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as err:
+        raise ValueError(f"Supertonic speed JSON invalid: {err}") from err
+    if not isinstance(data, dict):
+        raise ValueError("Supertonic speed JSON must contain an object mapping")
+    result: Dict[str, float] = {}
+    for key, value in data.items():
+        if not isinstance(key, str):
+            continue
+        try:
+            speed_val = float(value)
+        except (TypeError, ValueError):
+            continue
+        if speed_val > 0:
+            result[key.lower()] = speed_val
+    if result:
+        logger.info("Supertonic speeds loaded for: %s", ", ".join(sorted(result.keys())))
+    return result
+
+
 def build_speaker_mapping(
     language: str,
     overrides: Optional[Dict[str, str]],
@@ -231,6 +260,7 @@ class SupertonicSynthesizer:
         silence_duration: float,
         mock: bool,
         speaker_voice_map: Dict[str, str],
+        speaker_speed_map: Optional[Dict[str, float]] = None,
     ):
         self.sample_rate = SUPERTONIC_SAMPLE_RATE_FALLBACK
         self.default_voice = (default_voice or DEFAULT_MALE_VOICE).upper()
@@ -239,6 +269,14 @@ class SupertonicSynthesizer:
         self.max_chunk_length = max_chunk_length
         self.silence_duration = silence_duration
         self.speaker_voice_map = {k.lower(): v for k, v in speaker_voice_map.items()}
+        self.speaker_speed_map: Dict[str, float] = {}
+        for key, value in (speaker_speed_map or {}).items():
+            try:
+                speed_val = float(value)
+            except (TypeError, ValueError):
+                continue
+            if speed_val > 0:
+                self.speaker_speed_map[key.lower()] = speed_val
         self.mock = mock or not HAS_SUPERTONIC
         self.tts: Optional[TTS] = None
         self.style_cache: Dict[str, Any] = {}
@@ -271,11 +309,13 @@ class SupertonicSynthesizer:
         voice_choice = self._voice_for_speaker(speaker_name)
         try:
             style = self._style_for_voice(voice_choice)
+            spk = (speaker_name or "").strip().lower()
+            speed = self.speaker_speed_map.get(spk, self.speed)
             wav, _ = self.tts.synthesize(
                 text,
                 voice_style=style,
                 total_steps=self.total_steps,
-                speed=self.speed,
+                speed=speed,
                 max_chunk_length=self.max_chunk_length,
                 silence_duration=self.silence_duration,
             )
@@ -331,15 +371,29 @@ class SupertonicSynthesizer:
 
 
 class PodcastAssembler:
-    def __init__(self, pause_ms: int = 500):
+    def __init__(self, pause_ms: int = 500, pause_jitter_ms: int = 0, seed: int = 0):
         self.pause_ms = pause_ms
+        self.pause_jitter_ms = pause_jitter_ms
+        self._rng = random.Random(seed)
 
-    def assemble(self, segments_audio: List[AudioSegmentType]) -> AudioSegmentType:
+    def next_pause_duration(self) -> int:
+        jitter = (
+            self._rng.randint(-self.pause_jitter_ms, self.pause_jitter_ms)
+            if self.pause_jitter_ms
+            else 0
+        )
+        return max(250, self.pause_ms + jitter)
+
+    def assemble(
+        self, segments_audio: List[AudioSegmentType], pauses_ms: Optional[List[int]] = None
+    ) -> AudioSegmentType:
         total = AudioSegment.silent(duration=0)
         first = True
+        pause_iter = iter(pauses_ms or [])
         for seg in segments_audio:
             if not first:
-                total += AudioSegment.silent(duration=self.pause_ms)
+                pause_duration = next(pause_iter, self.next_pause_duration())
+                total += AudioSegment.silent(duration=pause_duration)
             total += seg
             first = False
         return total
@@ -416,7 +470,19 @@ def main():
         "--output-prefix", default=None, help="Optional base name (default: input stem)"
     )
     parser.add_argument(
-        "--pause-ms", type=int, default=600, help="Pause between segments (ms)"
+        "--pause-ms", type=int, default=750, help="Base pause between segments (ms)"
+    )
+    parser.add_argument(
+        "--pause-jitter-ms",
+        type=int,
+        default=120,
+        help="Random jitter added/subtracted from pauses between speakers (ms, default: 120)",
+    )
+    parser.add_argument(
+        "--pause-seed",
+        type=int,
+        default=0,
+        help="Random seed for pause jitter to keep timings reproducible",
     )
     parser.add_argument(
         "--mock", action="store_true", help="Force mock (no real synthesis, silence)"
@@ -455,14 +521,14 @@ def main():
     parser.add_argument(
         "--supertonic-speed",
         type=float,
-        default=1.05,
-        help="Playback speed multiplier for Supertonic (default: 1.05)",
+        default=0.93,
+        help="Playback speed multiplier for Supertonic (default: 0.93)",
     )
     parser.add_argument(
         "--supertonic-steps",
         type=int,
-        default=5,
-        help="Denoising steps for Supertonic (1-100, default: 5)",
+        default=10,
+        help="Denoising steps for Supertonic (1-100, default: 10)",
     )
     parser.add_argument(
         "--supertonic-max-chars",
@@ -473,8 +539,13 @@ def main():
     parser.add_argument(
         "--supertonic-silence-sec",
         type=float,
-        default=0.3,
-        help="Silence inserted between internal chunks (seconds, default: 0.3)",
+        default=0.15,
+        help="Silence inserted between internal chunks (seconds, default: 0.15)",
+    )
+    parser.add_argument(
+        "--supertonic-speeds-json",
+        default=None,
+        help="JSON mapping speaker names to speed multipliers (e.g., 0.94, 0.92)",
     )
     # Output / Struktur-Optionen
     parser.add_argument(
@@ -528,6 +599,16 @@ def main():
     )
     parser.add_argument(
         "--verbose", action="store_true", help="Enable verbose logging (DEBUG)"
+    )
+    parser.add_argument(
+        "--intro-mp3",
+        default=None,
+        help="Optional intro music MP3 path (defaults to intro/epic-metal.mp3 if present)",
+    )
+    parser.add_argument(
+        "--outro-mp3",
+        default=None,
+        help="Optional outro music MP3 path (defaults to intro music path if set)",
     )
 
     args = parser.parse_args()
@@ -599,6 +680,12 @@ def main():
     if args.supertonic_speed <= 0:
         logger.error("--supertonic-speed must be positive")
         return 1
+    if args.pause_ms < 0:
+        logger.error("--pause-ms must be non-negative")
+        return 1
+    if args.pause_jitter_ms < 0:
+        logger.error("--pause-jitter-ms must be >= 0")
+        return 1
     if args.supertonic_max_chars <= 0:
         logger.error("--supertonic-max-chars must be positive")
         return 1
@@ -608,6 +695,11 @@ def main():
 
     try:
         supertonic_voice_map = load_speaker_voice_map(args.supertonic_voices_json)
+    except (FileNotFoundError, ValueError) as err:
+        logger.error("%s", err)
+        return 1
+    try:
+        supertonic_speed_map = load_speaker_speed_map(args.supertonic_speeds_json)
     except (FileNotFoundError, ValueError) as err:
         logger.error("%s", err)
         return 1
@@ -646,6 +738,7 @@ def main():
         silence_duration=args.supertonic_silence_sec,
         mock=args.mock,
         speaker_voice_map=speaker_voice_map,
+        speaker_speed_map=supertonic_speed_map,
     )
 
     if synthesizer.mock and not args.mock:
@@ -653,16 +746,19 @@ def main():
             "Falling back to mock synthesis. Check Supertonic installation or pass --mock explicitly."
         )
 
-    assembler = PodcastAssembler(pause_ms=args.pause_ms)
+    assembler = PodcastAssembler(
+        pause_ms=args.pause_ms, pause_jitter_ms=args.pause_jitter_ms, seed=args.pause_seed
+    )
 
     # Synthesis loop
     audio_segments: List[AudioSegmentType] = []
+    pauses_ms: List[int] = []
     current_time = 0.0
     segments_wav_dir: Optional[Path] = segments_parent_dir
     pad_width = max(3, len(str(len(segments))))
 
     try:
-        for seg in segments:
+        for idx, seg in enumerate(segments):
             logger.debug(
                 "Synthesize segment %d (%s) ...", seg.index, seg.speaker
             )
@@ -704,9 +800,13 @@ def main():
                 )
 
             duration_sec = len(audio) / 1000.0
+            if idx > 0:
+                pause_duration = assembler.next_pause_duration()
+                pauses_ms.append(pause_duration)
+                current_time += pause_duration / 1000.0
             seg.start = current_time
             seg.end = current_time + duration_sec
-            current_time = seg.end + (args.pause_ms / 1000.0)
+            current_time = seg.end
             audio_segments.append(audio)
 
             # Optional per-segment WAV export
@@ -725,24 +825,38 @@ def main():
         return 1
 
     # Intro/Outro music (optional)
-    intro_path = Path("intro/epic-metal.mp3")
+    default_intro_path = Path("intro/epic-metal.mp3")
+    intro_path = Path(args.intro_mp3) if args.intro_mp3 else default_intro_path
+    outro_path = Path(args.outro_mp3) if args.outro_mp3 else intro_path
+
+    intro_audio: Optional[AudioSegmentType] = None
+    outro_audio: Optional[AudioSegmentType] = None
+
     if intro_path.exists():
         intro_audio = AudioSegment.from_file(str(intro_path))
-        outro_audio = intro_audio  # same audio for outro
-        combined = assembler.assemble(audio_segments)
-        final_audio = intro_audio + combined + outro_audio
-        intro_duration_sec = len(intro_audio) / 1000.0
-        outro_duration_sec = len(outro_audio) / 1000.0
+    elif args.intro_mp3:
+        logger.warning("Intro MP3 not found: %s", intro_path)
+
+    if outro_path.exists():
+        outro_audio = AudioSegment.from_file(str(outro_path))
+    elif args.outro_mp3:
+        logger.warning("Outro MP3 not found: %s", outro_path)
+
+    combined = assembler.assemble(audio_segments, pauses_ms=pauses_ms)
+    intro_duration_sec = len(intro_audio) / 1000.0 if intro_audio else 0.0
+    outro_duration_sec = len(outro_audio) / 1000.0 if outro_audio else 0.0
+
+    final_audio = combined
+    if intro_audio:
+        final_audio = intro_audio + final_audio
+    if outro_audio:
+        final_audio = final_audio + outro_audio
+    if intro_audio or outro_audio:
         logger.info(
-            "Intro/outro added: %s (%.1fs)",
-            intro_path.name,
-            intro_duration_sec,
+            "Intro/outro added (intro=%s, outro=%s)",
+            intro_path.name if intro_audio else "none",
+            outro_path.name if outro_audio else "none",
         )
-    else:
-        combined = assembler.assemble(audio_segments)
-        final_audio = combined
-        intro_duration_sec = 0.0
-        outro_duration_sec = 0.0
 
     # Export final assets
     mp3_path = final_dir / f"{base_name}.mp3"

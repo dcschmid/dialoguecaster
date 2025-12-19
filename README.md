@@ -139,16 +139,18 @@ Without structured output: final files in `--output-dir`, segment WAVs in `segme
 
 | Flag | Description |
 |------|-------------|
-| `--pause-ms` | Silence between dialogue segments (default 600) |
+| `--pause-ms` | Silence between dialogue segments (default `750`) |
+| `--pause-jitter-ms` | Random jitter on pauses to sound less metronomic (default `120`, set `0` to disable) |
 | `--supertonic-voice` | Default voice style for unknown/male speakers (default `M3`) |
 | `--supertonic-female-voice` | Fallback voice for female speakers (default `F3`) |
 | `--male-aliases` | Comma-separated speaker names mapped to the default male voice (default `daniel,male,host`) |
 | `--female-aliases` | Comma-separated speaker names mapped to the default female voice (default `annabelle,female,guest`) |
 | `--supertonic-voices-json` | JSON mapping speaker → voice style |
-| `--supertonic-speed` | Speed multiplier (default `1.05`) |
-| `--supertonic-steps` | Denoising steps `1–100` (default `5`) |
+| `--supertonic-speed` | Speed multiplier (default `0.93`) |
+| `--supertonic-steps` | Denoising steps `1–100` (default `10`) |
 | `--supertonic-max-chars` | Max chars before internal chunking (default `300`) |
-| `--supertonic-silence-sec` | Silence between internal chunks (default `0.3`) |
+| `--supertonic-silence-sec` | Silence between internal chunks (default `0.15`) |
+| `--supertonic-speeds-json` | JSON mapping speaker → speed multiplier (e.g., `{\"daniel\": 0.94}`) |
 | `--structured-output` / `--no-structured-output` | Toggle hierarchical layout |
 | `--reuse-existing-segments` / `--no-reuse-existing-segments` | Control segment caching |
 | `--mock` | Generate silence instead of running Supertonic |
