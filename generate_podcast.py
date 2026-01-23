@@ -37,19 +37,22 @@ except Exception:  # pragma: no cover
 
 if TYPE_CHECKING:
     from pydub import AudioSegment as AudioSegmentType
+    from supertonic import TTS
 else:
     AudioSegmentType = Any
+    TTS = Any
 
 # Supertonic (ONNX Runtime)
 HAS_SUPERTONIC = False
 SUPERTONIC_IMPORT_ERROR: Optional[Exception] = None
 try:  # pragma: no cover
-    from supertonic import TTS
+    from supertonic import TTS as _TTS_Runtime
 
     HAS_SUPERTONIC = True
+    if not TYPE_CHECKING:
+        TTS = _TTS_Runtime
 except Exception as err:  # pragma: no cover
     SUPERTONIC_IMPORT_ERROR = err
-    TTS = None  # type: ignore
 
 # Logging Setup
 LOG_LEVEL = os.getenv("CHATTERBOX_LOG_LEVEL", "INFO").upper()
@@ -406,32 +409,13 @@ def export_webvtt(segments: List[Segment], path: Path):
         secs = ts % 60
         return f"{hours:02d}:{minutes:02d}:{secs:06.3f}".replace(".", ",")
 
-    # optional intro/outro duration
-    intro_duration = getattr(export_webvtt, "intro_duration", 0.0)
-    outro_duration = getattr(export_webvtt, "outro_duration", 0.0)
-
     with path.open("w", encoding="utf-8") as f:
         f.write("WEBVTT\n\n")
-        idx = 1
-        if intro_duration > 0.0:
+        for idx, seg in enumerate(segments, 1):
             f.write(f"{idx}\n")
-            f.write(f"00:00:00,000 --> {fmt(intro_duration)}\n")
-            f.write(f"<v Music>Intro music\n\n")
-            idx += 1
-        for seg in segments:
-            f.write(f"{idx}\n")
-            f.write(
-                f"{fmt(seg.start + intro_duration)} --> "
-                f"{fmt(seg.end + intro_duration)}\n"
-            )
+            f.write(f"{fmt(seg.start)} --> {fmt(seg.end)}\n")
             speaker = re.sub(r"\s+", "_", seg.speaker.title())
             f.write(f"<v {speaker}>{seg.text}\n\n")
-            idx += 1
-        if outro_duration > 0.0:
-            last_end = segments[-1].end + intro_duration if segments else intro_duration
-            f.write(f"{idx}\n")
-            f.write(f"{fmt(last_end)} --> {fmt(last_end + outro_duration)}\n")
-            f.write(f"<v Music>Outro music\n\n")
 
 
 def main():
@@ -549,24 +533,6 @@ def main():
     )
     # Output / Struktur-Optionen
     parser.add_argument(
-        "--export-wav",
-        action="store_true",
-        default=True,
-        help="Export final WAV (disable with --no-export-wav)",
-    )
-    parser.add_argument(
-        "--no-export-wav", action="store_false", dest="export_wav"
-    )
-    parser.add_argument(
-        "--save-segments-wav",
-        action="store_true",
-        default=True,
-        help="Save each segment as WAV (disable with --no-save-segments-wav)",
-    )
-    parser.add_argument(
-        "--no-save-segments-wav", action="store_false", dest="save_segments_wav"
-    )
-    parser.add_argument(
         "--suppress-warnings",
         action="store_true",
         default=True,
@@ -600,16 +566,6 @@ def main():
     parser.add_argument(
         "--verbose", action="store_true", help="Enable verbose logging (DEBUG)"
     )
-    parser.add_argument(
-        "--intro-mp3",
-        default=None,
-        help="Optional intro music MP3 path (defaults to intro/epic-metal.mp3 if present)",
-    )
-    parser.add_argument(
-        "--outro-mp3",
-        default=None,
-        help="Optional outro music MP3 path (defaults to intro music path if set)",
-    )
 
     args = parser.parse_args()
     if args.verbose:
@@ -639,25 +595,9 @@ def main():
         structured_base = output_root / language / topic
         final_dir = structured_base / "final"
         final_dir.mkdir(parents=True, exist_ok=True)
-        segments_parent_dir = (
-            structured_base / "segments" if args.save_segments_wav else None
-        )
-        if segments_parent_dir:
-            segments_parent_dir.mkdir(parents=True, exist_ok=True)
         logger.info("Structured output enabled: %s", structured_base)
     else:
         final_dir = output_root
-        segments_parent_dir = (
-            output_root / "segments_wav" if args.save_segments_wav else None
-        )
-        if segments_parent_dir and not segments_parent_dir.exists():
-            segments_parent_dir.mkdir(parents=True, exist_ok=True)
-        if args.save_segments_wav and not args.structured_output:
-            logger.info(
-                "Note: segment WAVs stored flat in %s/segments_wav. "
-                "Use --structured-output for <out>/<lang>/<topic>/(final|segments)",
-                output_root,
-            )
 
     content = input_path.read_text(encoding="utf-8")
     parser_md = MarkdownDialogueParser()
@@ -754,50 +694,17 @@ def main():
     audio_segments: List[AudioSegmentType] = []
     pauses_ms: List[int] = []
     current_time = 0.0
-    segments_wav_dir: Optional[Path] = segments_parent_dir
-    pad_width = max(3, len(str(len(segments))))
 
     try:
         for idx, seg in enumerate(segments):
             logger.debug(
                 "Synthesize segment %d (%s) ...", seg.index, seg.speaker
             )
-            safe_speaker = re.sub(
-                r"[^a-zA-Z0-9_-]", "_", seg.speaker.lower()
+            audio = synthesizer.synthesize(seg.text, seg.speaker)
+            logger.debug(
+                "Synthesized new audio for segment %d",
+                seg.index,
             )
-            seg_filename = (
-                f"{base_name}_segment_{seg.index:0{pad_width}d}_{safe_speaker}.wav"
-            )
-            seg_path = (
-                segments_wav_dir / seg_filename
-                if segments_wav_dir is not None
-                else None
-            )
-
-            audio: Optional[AudioSegmentType] = None
-            if (
-                seg_path
-                and seg_path.exists()
-                and args.reuse_existing_segments
-                and segments_wav_dir is not None
-            ):
-                try:
-                    audio = AudioSegment.from_file(str(seg_path))
-                    logger.info("Reusing existing segment %s", seg_filename)
-                except Exception as reuse_err:  # pragma: no cover
-                    logger.warning(
-                        "Could not reuse segment %s (%s) – regenerating",
-                        seg_filename,
-                        reuse_err,
-                    )
-                    audio = None
-
-            if audio is None:
-                audio = synthesizer.synthesize(seg.text, seg.speaker)
-                logger.debug(
-                    "Synthesized new audio for segment %d",
-                    seg.index,
-                )
 
             duration_sec = len(audio) / 1000.0
             if idx > 0:
@@ -808,69 +715,19 @@ def main():
             seg.end = current_time + duration_sec
             current_time = seg.end
             audio_segments.append(audio)
-
-            # Optional per-segment WAV export
-            if segments_wav_dir is not None and seg_path is not None:
-                if audio is not None and (
-                    not seg_path.exists() or not args.reuse_existing_segments
-                ):
-                    try:
-                        audio.export(str(seg_path), format="wav")
-                    except Exception as e:  # pragma: no cover
-                        logger.warning(
-                            "Could not save segment %s (%s)", seg.index, e
-                        )
     except KeyboardInterrupt:
         logger.warning("Interrupted by user – stopping synthesis early")
         return 1
 
-    # Intro/Outro music (optional)
-    default_intro_path = Path("intro/epic-metal.mp3")
-    intro_path = Path(args.intro_mp3) if args.intro_mp3 else default_intro_path
-    outro_path = Path(args.outro_mp3) if args.outro_mp3 else intro_path
-
-    intro_audio: Optional[AudioSegmentType] = None
-    outro_audio: Optional[AudioSegmentType] = None
-
-    if intro_path.exists():
-        intro_audio = AudioSegment.from_file(str(intro_path))
-    elif args.intro_mp3:
-        logger.warning("Intro MP3 not found: %s", intro_path)
-
-    if outro_path.exists():
-        outro_audio = AudioSegment.from_file(str(outro_path))
-    elif args.outro_mp3:
-        logger.warning("Outro MP3 not found: %s", outro_path)
-
+    # Assemble final podcast
     combined = assembler.assemble(audio_segments, pauses_ms=pauses_ms)
-    intro_duration_sec = len(intro_audio) / 1000.0 if intro_audio else 0.0
-    outro_duration_sec = len(outro_audio) / 1000.0 if outro_audio else 0.0
-
-    final_audio = combined
-    if intro_audio:
-        final_audio = intro_audio + final_audio
-    if outro_audio:
-        final_audio = final_audio + outro_audio
-    if intro_audio or outro_audio:
-        logger.info(
-            "Intro/outro added (intro=%s, outro=%s)",
-            intro_path.name if intro_audio else "none",
-            outro_path.name if outro_audio else "none",
-        )
 
     # Export final assets
     mp3_path = final_dir / f"{base_name}.mp3"
-    final_audio.export(str(mp3_path), format="mp3", bitrate="256k")
-    logger.info("MP3 exported: %s (%.1fs)", mp3_path, len(final_audio) / 1000.0)
-
-    if args.export_wav:
-        wav_path = final_dir / f"{base_name}.wav"
-        final_audio.export(str(wav_path), format="wav")
-        logger.info("WAV exported: %s", wav_path)
+    combined.export(str(mp3_path), format="mp3", bitrate="256k")
+    logger.info("MP3 exported: %s (%.1fs)", mp3_path, len(combined) / 1000.0)
 
     vtt_path = final_dir / f"{base_name}.vtt"
-    export_webvtt.intro_duration = intro_duration_sec
-    export_webvtt.outro_duration = outro_duration_sec
     export_webvtt(segments, vtt_path)
     logger.info("VTT exported: %s", vtt_path)
 
