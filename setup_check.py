@@ -6,32 +6,32 @@ Verifies basic structure & dependencies for the local Supertonic ONNX pipeline.
 """
 
 import os
-import sys
+
 
 def check_project_structure():
     """Validate required project structure."""
     print("🔍 PROJECT STRUCTURE CHECK")
     print("=" * 50)
-    
+
     required_files = [
         "generate_podcast.py",
         "requirements.txt",
         "README.md",
         "LICENSE",
     ]
-    
+
     missing_files = []
-    
+
     for file_path in required_files:
         if os.path.exists(file_path):
             print(f"✅ {file_path}")
         else:
             print(f"❌ {file_path}")
             missing_files.append(file_path)
-    
+
     print("\n📁 DIRECTORIES:")
     directories = ["podscripts", "output"]
-    
+
     for directory in directories:
         if os.path.exists(directory):
             files = os.listdir(directory)
@@ -39,9 +39,9 @@ def check_project_structure():
         else:
             print(f"❌ {directory}/")
             missing_files.append(f"{directory}/")
-    
+
     print("\n" + "=" * 50)
-    
+
     if missing_files:
         print(f"⚠️ {len(missing_files)} missing files/directories:")
         for item in missing_files:
@@ -51,11 +51,12 @@ def check_project_structure():
         print("🎉 Structure OK")
         return True
 
+
 def check_dependencies():
     """Check installed runtime dependencies."""
     print("\n🔧 DEPENDENCY CHECK")
     print("=" * 50)
-    
+
     dependencies = [
         ("pydub", "Audio Processing"),
         ("dotenv", "Environment Variables"),
@@ -63,9 +64,9 @@ def check_dependencies():
         ("supertonic", "Supertonic TTS"),
         ("onnxruntime", "ONNX Runtime (CPU backend)"),
     ]
-    
+
     missing_deps = []
-    
+
     for module, description in dependencies:
         try:
             __import__(module)
@@ -73,7 +74,7 @@ def check_dependencies():
         except ImportError:
             print(f"❌ {module} - {description}")
             missing_deps.append(module)
-    
+
     if missing_deps:
         print(f"\n⚠️ Missing dependencies: {', '.join(missing_deps)}")
         print("💡 Install with: pip install -r requirements.txt")
@@ -81,6 +82,7 @@ def check_dependencies():
     else:
         print("\n🎉 All dependencies installed")
         return True
+
 
 def show_quick_start():
     """Display quick start instructions (local, no API keys)."""
@@ -103,24 +105,26 @@ def show_quick_start():
     print("5. Real synthesis (first run downloads Supertonic models automatically):")
     print("   python generate_podcast.py podscripts/decades/1980s.md --language en --output-dir out_real")
 
+
 def main():
     """Entry point."""
     print("🎙️ PODCAST TTS - PROJECT STATUS (SUPERTONIC)")
     print("=" * 60)
-    
+
     structure_ok = check_project_structure()
     deps_ok = check_dependencies()
-    
+
     show_quick_start()
-    
+
     print("\n" + "=" * 60)
-    
+
     if structure_ok and deps_ok:
         print("🎉 PROJECT READY – no API keys required")
         print("🎯 Next: run mock or real synthesis")
     else:
         print("⚠️ INCOMPLETE PROJECT SETUP")
         print("🔧 Follow instructions above to resolve")
+
 
 if __name__ == "__main__":
     main()

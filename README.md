@@ -1,13 +1,13 @@
 # DialogueCaster — Markdown → Podcast (Supertonic)
 
-Convert Markdown dialogue (`Name: Text`) into podcast audio with **Supertonic** (ONNX Runtime, fully local). The pipeline parses dialogue lines into segments, synthesizes them, stitches them together with pauses and optional intro/outro music, and exports **MP3**, **WAV**, and **WebVTT**.
+Convert Markdown dialogue (`Name: Text`) into podcast audio with **Supertonic** (ONNX Runtime, fully local). The pipeline parses dialogue lines into segments, synthesizes them, stitches them together with pauses and optional intro/outro music, and exports **MP3**, **WAV**, **WebVTT**, and optionally **Video** (static image + audio).
 
 ---
 
 ## 1. Overview
 
 ```
-Markdown → Dialogue Parser → Supertonic → Audio Segments → MP3/WAV → WebVTT
+Markdown → Dialogue Parser → Supertonic → Audio Segments → MP3/WAV → WebVTT → Optional Video
 ```
 
 - Fully local Supertonic TTS (models auto-download on first run)
@@ -15,6 +15,7 @@ Markdown → Dialogue Parser → Supertonic → Audio Segments → MP3/WAV → W
 - Segment-based synthesis (clean timing, caching-friendly)
 - Structured output layout with per-segment WAVs (on by default)
 - Mock mode for fast tests without real synthesis
+- **NEW**: Video export with static image + audio (requires FFmpeg)
 
 ---
 
@@ -154,10 +155,34 @@ Without structured output: final files in `--output-dir`, segment WAVs in `segme
 | `--structured-output` / `--no-structured-output` | Toggle hierarchical layout |
 | `--reuse-existing-segments` / `--no-reuse-existing-segments` | Control segment caching |
 | `--mock` | Generate silence instead of running Supertonic |
+| `--export-video` | Export video file (requires --image-file) |
+| `--image-file` | Path to static image for video generation |
+| `--video-format` | Video format: mp4, avi, mov (default: mp4) |
 
 ---
 
-## 10. Troubleshooting
+## 10. Video Export (Optional)
+
+Create videos by combining a static image with the generated audio:
+
+```bash
+python generate_podcast.py script.md \
+  --export-video \
+  --image-file cover.jpg \
+  --video-format mp4 \
+  --output-dir output_video
+```
+
+**Video Export Requirements:**
+- FFmpeg must be available on `PATH` (same as MP3 export)
+- Supported image formats: `.jpg`, `.jpeg`, `.png`, `.bmp`, `.tiff`, `.webp`
+- Video formats: `mp4` (default), `avi`, `mov`
+
+The video will have the same duration as the audio and will be saved in the final output directory alongside the MP3 and VTT files.
+
+---
+
+## 12. Troubleshooting
 
 | Issue | Fix |
 |-------|-----|
@@ -169,7 +194,7 @@ Without structured output: final files in `--output-dir`, segment WAVs in `segme
 
 ---
 
-## 11. Project Structure
+## 13. Project Structure
 
 ```
 generate_podcast.py      # Main CLI for Supertonic synthesis

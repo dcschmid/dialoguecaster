@@ -1,4 +1,5 @@
 """Small standalone image geometry utilities (aspect containment helper)."""
+
 from typing import Tuple
 
 

@@ -3,9 +3,10 @@
 Provides a simple, well-documented `sorting_algorithm` function that wraps
 Python's built-in `sorted()` for predictable, stable sorting behavior.
 """
+
 from typing import Iterable, List, TypeVar
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 def sorting_algorithm(items: Iterable[T]) -> List[T]:

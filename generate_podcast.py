@@ -15,6 +15,7 @@ Markdown dialogue scripts into audio (WAV/MP3) plus WebVTT subtitles.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import shutil
 import sys
@@ -24,10 +25,51 @@ import logging
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, TYPE_CHECKING, Any
+from typing import (
+    Dict,
+    List,
+    Optional,
+    TYPE_CHECKING,
+    Any,
+    Literal,
+    TypedDict,
+)
 from dotenv import load_dotenv
 import json
 import numpy as np
+
+
+# Custom Exception Hierarchy
+class DialogueCasterError(Exception):
+    """Base exception for DialogueCaster application."""
+    pass
+
+
+class ConfigurationError(DialogueCasterError):
+    """Raised when there's a configuration problem."""
+    pass
+
+
+class SynthesisError(DialogueCasterError):
+    """Raised when audio synthesis fails."""
+    pass
+
+
+class ValidationError(DialogueCasterError):
+    """Raised when input validation fails."""
+    pass
+
+
+class FFmpegError(DialogueCasterError):
+    """Raised when FFmpeg operations fail."""
+    pass
+
+
+class DependencyError(DialogueCasterError):
+    """Raised when required dependencies are missing."""
+    pass
+import subprocess
+from PIL import Image
 
 AudioSegment: Any = None
 try:
@@ -74,6 +116,67 @@ DEFAULT_FEMALE_ALIASES = ["annabelle", "female", "guest"]
 
 # Regex: speaker line "Name: Text"
 SPEAKER_LINE = re.compile(r"^([A-Za-z0-9_ÄÖÜäöüß\- ]{1,40}):\s*(.*)$")
+
+
+class VoiceStyleConfig(TypedDict, total=False):
+    """Configuration for voice style mapping."""
+    voice: str
+    id: str
+    name: str
+
+
+class SpeedConfig(TypedDict):
+    """Configuration for speaker speed mapping."""
+    speed: float
+
+
+class AudioSegmentCache:
+    """Cache for audio segments to avoid re-synthesis."""
+    
+    def __init__(self, cache_dir: Path):
+        self.cache_dir = cache_dir
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+    
+    def _get_cache_key(self, text: str, speaker: str, voice: str, speed: float) -> str:
+        """Generate cache key based on content and parameters."""
+        content = f"{text}|{speaker}|{voice}|{speed}"
+        return hashlib.md5(content.encode('utf-8')).hexdigest()
+    
+    def get_cached_segment(self, text: str, speaker: str, voice: str, speed: float) -> Optional[AudioSegmentType]:
+        """Get cached audio segment if available."""
+        cache_key = self._get_cache_key(text, speaker, voice, speed)
+        cache_file = self.cache_dir / f"{cache_key}.wav"
+        
+        if cache_file.exists():
+            try:
+                if AudioSegment is not None:
+                    return AudioSegment.from_file(str(cache_file))
+            except Exception as err:
+                logger.debug("Failed to load cached segment: %s", err)
+        return None
+    
+    def cache_segment(self, text: str, speaker: str, voice: str, speed: float, segment: AudioSegmentType) -> None:
+        """Cache an audio segment."""
+        if AudioSegment is None:
+            return
+            
+        cache_key = self._get_cache_key(text, speaker, voice, speed)
+        cache_file = self.cache_dir / f"{cache_key}.wav"
+        
+        try:
+            segment.export(str(cache_file), format="wav")
+            logger.debug("Cached segment: %s", cache_key[:8])
+        except Exception as err:
+            logger.debug("Failed to cache segment: %s", err)
+    
+    def clear_cache(self) -> None:
+        """Clear all cached segments."""
+        if self.cache_dir.exists():
+            for cache_file in self.cache_dir.glob("*.wav"):
+                try:
+                    cache_file.unlink()
+                except Exception as err:
+                    logger.debug("Failed to delete cache file %s: %s", cache_file, err)
 
 
 @dataclass
@@ -151,7 +254,8 @@ def load_speaker_voice_map(path_str: Optional[str], required: bool = False) -> D
         if isinstance(value, str):
             voice = value.strip()
         elif isinstance(value, dict):
-            preferred = value.get("voice") or value.get("id") or value.get("name")
+            voice_config: VoiceStyleConfig = value  # type: ignore
+            preferred = voice_config.get("voice") or voice_config.get("id") or voice_config.get("name")
             if isinstance(preferred, str):
                 voice = preferred.strip()
         if voice:
@@ -264,6 +368,7 @@ class SupertonicSynthesizer:
         mock: bool,
         speaker_voice_map: Dict[str, str],
         speaker_speed_map: Optional[Dict[str, float]] = None,
+        cache_dir: Optional[Path] = None,
     ):
         self.sample_rate = SUPERTONIC_SAMPLE_RATE_FALLBACK
         self.default_voice = (default_voice or DEFAULT_MALE_VOICE).upper()
@@ -283,13 +388,17 @@ class SupertonicSynthesizer:
         self.mock = mock or not HAS_SUPERTONIC
         self.tts: Optional[TTS] = None
         self.style_cache: Dict[str, Any] = {}
+        
+        # Initialize audio cache
+        if cache_dir:
+            self.cache = AudioSegmentCache(cache_dir)
+        else:
+            self.cache = None
 
         if not self.mock:
             try:
                 self.tts = TTS(auto_download=True)
-                self.sample_rate = int(
-                    getattr(self.tts, "sample_rate", SUPERTONIC_SAMPLE_RATE_FALLBACK)
-                )
+                self.sample_rate = int(getattr(self.tts, "sample_rate", SUPERTONIC_SAMPLE_RATE_FALLBACK))
                 logger.info(
                     "Supertonic ready (default voice=%s, sample_rate=%s)",
                     self.default_voice,
@@ -306,27 +415,42 @@ class SupertonicSynthesizer:
     def synthesize(self, text: str, speaker_name: str) -> AudioSegmentType:
         if not text.strip():
             return AudioSegment.silent(duration=250)
-        if self.mock or self.tts is None:
-            return self._mock_audio(text)
-
+        
         voice_choice = self._voice_for_speaker(speaker_name)
-        try:
-            style = self._style_for_voice(voice_choice)
-            spk = (speaker_name or "").strip().lower()
-            speed = self.speaker_speed_map.get(spk, self.speed)
-            wav, _ = self.tts.synthesize(
-                text,
-                voice_style=style,
-                total_steps=self.total_steps,
-                speed=speed,
-                max_chunk_length=self.max_chunk_length,
-                silence_duration=self.silence_duration,
-            )
-        except Exception as err:  # pragma: no cover
-            logger.error("Supertonic synthesis failed for %s (%s)", speaker_name or "unknown", err)
-            return self._mock_audio(text)
-
-        return self._numpy_audio_to_segment(wav)
+        spk = (speaker_name or "").strip().lower()
+        speed = self.speaker_speed_map.get(spk, self.speed)
+        
+        # Check cache first
+        if self.cache and not self.mock:
+            cached_segment = self.cache.get_cached_segment(text, spk, voice_choice, speed)
+            if cached_segment:
+                logger.debug("Using cached segment for %s", spk)
+                return cached_segment
+        
+        if self.mock or self.tts is None:
+            audio = self._mock_audio(text)
+        else:
+            try:
+                style = self._style_for_voice(voice_choice)
+                wav, _ = self.tts.synthesize(
+                    text,
+                    voice_style=style,
+                    total_steps=self.total_steps,
+                    speed=speed,
+                    max_chunk_length=self.max_chunk_length,
+                    silence_duration=self.silence_duration,
+                )
+                audio = self._numpy_audio_to_segment(wav)
+            except Exception as err:
+                raise SynthesisError(
+                    f"Supertonic synthesis failed for {speaker_name or 'unknown'}: {err}"
+                ) from err
+        
+        # Cache the synthesized segment
+        if self.cache and not self.mock:
+            self.cache.cache_segment(text, spk, voice_choice, speed, audio)
+        
+        return audio
 
     def _voice_for_speaker(self, speaker_name: Optional[str]) -> str:
         if self.speaker_voice_map:
@@ -380,11 +504,7 @@ class PodcastAssembler:
         self._rng = random.Random(seed)
 
     def next_pause_duration(self) -> int:
-        jitter = (
-            self._rng.randint(-self.pause_jitter_ms, self.pause_jitter_ms)
-            if self.pause_jitter_ms
-            else 0
-        )
+        jitter = self._rng.randint(-self.pause_jitter_ms, self.pause_jitter_ms) if self.pause_jitter_ms else 0
         return max(250, self.pause_ms + jitter)
 
     def assemble(
@@ -418,6 +538,238 @@ def export_webvtt(segments: List[Segment], path: Path):
             f.write(f"<v {speaker}>{seg.text}\n\n")
 
 
+def validate_input_file(file_path: Path) -> None:
+    """Validate input file for security and existence."""
+    if not file_path.exists():
+        raise ValidationError(f"Input file not found: {file_path}")
+    
+    if not file_path.is_file():
+        raise ValidationError(f"Input path is not a file: {file_path}")
+    
+    # Security: Check file size (prevent extremely large files)
+    file_size = file_path.stat().st_size
+    max_size = 100 * 1024 * 1024  # 100MB limit
+    if file_size > max_size:
+        raise ValidationError(f"Input file too large: {file_size:,} bytes (max: {max_size:,})")
+    
+    # Security: Check file extension
+    allowed_extensions = {'.md', '.txt', '.markdown'}
+    if file_path.suffix.lower() not in allowed_extensions:
+        raise ValidationError(
+            f"Unsupported file extension: {file_path.suffix}. "
+            f"Allowed: {', '.join(allowed_extensions)}"
+        )
+    
+    # Security: Check file content (basic validation)
+    try:
+        content = file_path.read_text(encoding="utf-8")
+        if not content.strip():
+            raise ValidationError("Input file is empty")
+        
+        # Basic content validation - ensure it's text
+        if len(content) > 10_000_000:  # 10M character limit
+            raise ValidationError("Input file content too large")
+            
+    except UnicodeDecodeError:
+        raise ValidationError("Input file is not valid UTF-8 text")
+    except Exception as err:
+        raise ValidationError(f"Error reading input file: {err}") from err
+
+
+def validate_output_dir(output_dir: Path) -> None:
+    """Validate output directory for security."""
+    # Security: Normalize path to prevent directory traversal
+    try:
+        resolved_path = output_dir.resolve()
+    except Exception as err:
+        raise ValidationError(f"Invalid output path: {err}") from err
+    
+    # Security: Ensure we're not writing to system directories
+    forbidden_patterns = ['/bin', '/sbin', '/usr', '/etc', '/sys', '/proc', '/dev']
+    resolved_str = str(resolved_path)
+    
+    for pattern in forbidden_patterns:
+        if resolved_str.startswith(pattern):
+            raise ValidationError(f"Output directory not allowed: {resolved_path}")
+    
+    # Security: Check if parent directory exists and is writable
+    try:
+        parent = resolved_path.parent
+        if not parent.exists():
+            parent.mkdir(parents=True, exist_ok=True)
+        
+        # Test write permissions
+        test_file = parent / ".write_test"
+        test_file.write_text("test")
+        test_file.unlink()
+    except Exception as err:
+        raise ValidationError(f"Cannot write to output directory: {err}") from err
+
+
+def sanitize_filename(filename: str) -> str:
+    """Sanitize filename for security."""
+    if not filename:
+        return "output"
+    
+    # Remove path separators and dangerous characters
+    dangerous_chars = ['/', '\\', '..', '\0', '|', ';', '&', '$', '`', '(', ')', '[', ']', '{', '}', '<', '>', '"', "'"]
+    sanitized = filename
+    
+    for char in dangerous_chars:
+        sanitized = sanitized.replace(char, '_')
+    
+    # Remove control characters
+    sanitized = ''.join(char for char in sanitized if ord(char) >= 32)
+    
+    # Limit length and ensure it's not empty
+    sanitized = sanitized[:100]
+    return sanitized or "output"
+
+
+def validate_cli_arguments(args) -> None:
+    """Validate CLI arguments for security and correctness."""
+    if args.pause_ms < 0:
+        raise ValidationError("Pause duration must be non-negative")
+    
+    if args.pause_ms > 10000:  # 10 second limit
+        raise ValidationError("Pause duration too long (max: 10,000ms)")
+    
+    if args.supertonic_speed <= 0:
+        raise ValidationError("Speech speed must be positive")
+    
+    if args.supertonic_speed > 10:  # Reasonable upper limit
+        raise ValidationError("Speech speed too high (max: 10.0)")
+    
+    if args.supertonic_steps < 1 or args.supertonic_steps > 100:
+        raise ValidationError("Supertonic steps must be between 1 and 100")
+    
+    # Security: Validate image file if provided
+    if args.image_file:
+        try:
+            validate_image_file(args.image_file)
+        except ValidationError:
+            raise
+        except Exception as err:
+            raise ValidationError(f"Invalid image file: {err}") from err
+
+
+def validate_image_file(image_path: str) -> bool:
+    """Validate that the image file exists and is a supported format."""
+    if not image_path:
+        raise ValidationError("Image path cannot be empty")
+
+    path = Path(image_path)
+    if not path.exists():
+        raise ValidationError(f"Image file not found: {path}")
+
+    supported_formats = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'}
+    if path.suffix.lower() not in supported_formats:
+        raise ValidationError(
+            f"Unsupported image format: {path.suffix}. Supported: {', '.join(supported_formats)}"
+        )
+
+    try:
+        with Image.open(path) as img:
+            img.verify()
+        return True
+    except Exception as err:
+        raise ValidationError(f"Invalid image file {path}: {err}") from err
+
+    path = Path(image_path)
+    if not path.exists():
+        logger.error("Image file not found: %s", path)
+        return False
+
+    supported_formats = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
+    if path.suffix.lower() not in supported_formats:
+        logger.error("Unsupported image format: %s. Supported: %s", path.suffix, ", ".join(supported_formats))
+        return False
+
+    try:
+        with Image.open(path) as img:
+            img.verify()
+        return True
+    except Exception as err:
+        logger.error("Invalid image file %s: %s", path, err)
+        return False
+
+
+def create_video_with_static_image(
+    image_path: str, audio_path: Path, output_path: Path, video_format: Literal["mp4", "avi", "mov"] = "mp4"
+) -> bool:
+    """Create a video file by combining a static image with audio using FFmpeg."""
+    if not shutil.which("ffmpeg"):
+        raise DependencyError("ffmpeg not found on PATH – required for video export")
+
+    try:
+        cmd = [
+            "ffmpeg",
+            "-y",  # Overwrite output file
+            "-loop",
+            "1",  # Loop image
+            "-i",
+            image_path,  # Input image
+            "-i",
+            str(audio_path),  # Input audio
+            "-c:v",
+            "libx264",  # Video codec
+            "-tune",
+            "stillimage",  # Optimize for still images
+            "-c:a",
+            "aac",  # Audio codec
+            "-b:a",
+            "192k",  # Audio bitrate
+            "-pix_fmt",
+            "yuv420p",  # Pixel format for compatibility
+            "-shortest",  # Finish when audio ends
+            str(output_path),
+        ]
+
+        subprocess.run(cmd, capture_output=True, text=True, check=True)
+        logger.info("Video exported: %s", output_path)
+        return True
+
+    except subprocess.CalledProcessError as err:
+        raise FFmpegError(f"Video creation failed: {err.stderr}") from err
+    except Exception as err:
+        raise FFmpegError(f"Unexpected error during video creation: {err}") from err
+
+    try:
+        cmd = [
+            "ffmpeg",
+            "-y",  # Overwrite output file
+            "-loop",
+            "1",  # Loop the image
+            "-i",
+            image_path,  # Input image
+            "-i",
+            str(audio_path),  # Input audio
+            "-c:v",
+            "libx264",  # Video codec
+            "-tune",
+            "stillimage",  # Optimize for still images
+            "-c:a",
+            "aac",  # Audio codec
+            "-b:a",
+            "192k",  # Audio bitrate
+            "-pix_fmt",
+            "yuv420p",  # Pixel format for compatibility
+            "-shortest",  # Finish when audio ends
+            str(output_path),
+        ]
+
+        subprocess.run(cmd, capture_output=True, text=True, check=True)
+        logger.info("Video exported: %s", output_path)
+        return True
+
+    except subprocess.CalledProcessError as err:
+        logger.error("Video creation failed: %s", err.stderr)
+        return False
+    except Exception as err:
+        logger.error("Unexpected error during video creation: %s", err)
+        return False
+
+
 def main():
     if sys.version_info < MIN_PYTHON:
         logger.error(
@@ -430,32 +782,20 @@ def main():
         logger.debug("Running on Python %s.%s.%s", *sys.version_info[:3])
 
     if AudioSegment is None:
-        logger.error(
-            "pydub not available – install requirements via `pip install -r requirements.txt`"
-        )
+        logger.error("pydub not available – install requirements via `pip install -r requirements.txt`")
         return 1
     if shutil.which("ffmpeg") is None:
-        logger.warning(
-            "ffmpeg not found on PATH – MP3 export will fail; install ffmpeg to enable MP3 output"
-        )
+        logger.warning("ffmpeg not found on PATH – MP3 export will fail; install ffmpeg to enable MP3 output")
 
     load_dotenv()
     parser = argparse.ArgumentParser(
         description="Podcast Markdown -> Audio via Supertonic (English dialogue synthesis)"
     )
     parser.add_argument("input_file", help="Markdown file with dialogue")
-    parser.add_argument(
-        "--language", "-l", default=DEFAULT_LANGUAGE, help="Language code (en)"
-    )
-    parser.add_argument(
-        "--output-dir", default="output_supertonic", help="Output directory"
-    )
-    parser.add_argument(
-        "--output-prefix", default=None, help="Optional base name (default: input stem)"
-    )
-    parser.add_argument(
-        "--pause-ms", type=int, default=750, help="Base pause between segments (ms)"
-    )
+    parser.add_argument("--language", "-l", default=DEFAULT_LANGUAGE, help="Language code (en)")
+    parser.add_argument("--output-dir", default="output_supertonic", help="Output directory")
+    parser.add_argument("--output-prefix", default=None, help="Optional base name (default: input stem)")
+    parser.add_argument("--pause-ms", type=int, default=750, help="Base pause between segments (ms)")
     parser.add_argument(
         "--pause-jitter-ms",
         type=int,
@@ -468,9 +808,7 @@ def main():
         default=0,
         help="Random seed for pause jitter to keep timings reproducible",
     )
-    parser.add_argument(
-        "--mock", action="store_true", help="Force mock (no real synthesis, silence)"
-    )
+    parser.add_argument("--mock", action="store_true", help="Force mock (no real synthesis, silence)")
     parser.add_argument(
         "--tts-backend",
         choices=["supertonic"],
@@ -538,38 +876,60 @@ def main():
         default=True,
         help="Suppress future/deprecation warnings (disable with --no-suppress-warnings)",
     )
-    parser.add_argument(
-        "--no-suppress-warnings", action="store_false", dest="suppress_warnings"
-    )
+    parser.add_argument("--no-suppress-warnings", action="store_false", dest="suppress_warnings")
     parser.add_argument(
         "--structured-output",
         action="store_true",
         default=True,
-        help="Hierarchical layout: <out>/<language>/<topic>/(final|segments) "
-        "(disable with --no-structured-output)",
+        help="Hierarchical layout: <out>/<language>/<topic>/(final|segments) " "(disable with --no-structured-output)",
     )
-    parser.add_argument(
-        "--no-structured-output", action="store_false", dest="structured_output"
-    )
+    parser.add_argument("--no-structured-output", action="store_false", dest="structured_output")
     parser.add_argument(
         "--reuse-existing-segments",
         action="store_true",
         default=True,
-        help="Reuse existing segment WAVs when present "
-        "(disable with --no-reuse-existing-segments)",
+        help="Reuse existing segment WAVs when present " "(disable with --no-reuse-existing-segments)",
     )
     parser.add_argument(
         "--no-reuse-existing-segments",
         action="store_false",
         dest="reuse_existing_segments",
     )
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging (DEBUG)")
+    
+    # Caching Options
     parser.add_argument(
-        "--verbose", action="store_true", help="Enable verbose logging (DEBUG)"
+        "--cache-dir",
+        default=None,
+        help="Directory for audio segment caching (default: <output_dir>/.cache)",
+    )
+    parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="Clear audio cache before synthesis",
+    )
+    
+    # Video Export Options
+    parser.add_argument(
+        "--image-file", default=None, help="Path to static image file for video generation (e.g., cover.jpg)"
+    )
+    parser.add_argument(
+        "--export-video", action="store_true", help="Export video file combining static image with audio"
+    )
+    parser.add_argument(
+        "--video-format", default="mp4", choices=["mp4", "avi", "mov"], help="Video format for export (default: mp4)"
     )
 
     args = parser.parse_args()
     if args.verbose:
         logger.setLevel(logging.DEBUG)
+
+    # Security: Validate CLI arguments
+    try:
+        validate_cli_arguments(args)
+    except ValidationError as err:
+        logger.error("Validation failed: %s", err)
+        return 1
 
     language = args.language.lower()
     if language not in SUPPORTED_LANGS:
@@ -581,13 +941,32 @@ def main():
         language = DEFAULT_LANGUAGE
 
     input_path = Path(args.input_file)
-    if not input_path.exists():
-        logger.error("Input file missing: %s", input_path)
+    
+    # Security: Validate input file
+    try:
+        validate_input_file(input_path)
+    except ValidationError as err:
+        logger.error("Input validation failed: %s", err)
         return 1
+    
     output_root = Path(args.output_dir)
+    
+    # Security: Validate output directory
+    try:
+        validate_output_dir(output_root)
+    except ValidationError as err:
+        logger.error("Output validation failed: %s", err)
+        return 1
     output_root.mkdir(parents=True, exist_ok=True)
 
     base_name = args.output_prefix or input_path.stem
+
+    # Setup cache directory
+    cache_dir = Path(args.cache_dir) if args.cache_dir else output_root / ".cache"
+    if args.clear_cache:
+        cache = AudioSegmentCache(cache_dir)
+        cache.clear_cache()
+        logger.info("Cleared audio cache")
 
     # Prepare structured output layout if requested
     if args.structured_output:
@@ -659,8 +1038,7 @@ def main():
     if not HAS_SUPERTONIC and not args.mock:
         detail = f" ({SUPERTONIC_IMPORT_ERROR})" if SUPERTONIC_IMPORT_ERROR else ""
         logger.error(
-            "Supertonic backend unavailable%s. "
-            "Install via `pip install supertonic` or run with --mock.",
+            "Supertonic backend unavailable%s. " "Install via `pip install supertonic` or run with --mock.",
             detail,
         )
         return 1
@@ -679,16 +1057,13 @@ def main():
         mock=args.mock,
         speaker_voice_map=speaker_voice_map,
         speaker_speed_map=supertonic_speed_map,
+        cache_dir=cache_dir,
     )
 
     if synthesizer.mock and not args.mock:
-        logger.warning(
-            "Falling back to mock synthesis. Check Supertonic installation or pass --mock explicitly."
-        )
+        logger.warning("Falling back to mock synthesis. Check Supertonic installation or pass --mock explicitly.")
 
-    assembler = PodcastAssembler(
-        pause_ms=args.pause_ms, pause_jitter_ms=args.pause_jitter_ms, seed=args.pause_seed
-    )
+    assembler = PodcastAssembler(pause_ms=args.pause_ms, pause_jitter_ms=args.pause_jitter_ms, seed=args.pause_seed)
 
     # Synthesis loop
     audio_segments: List[AudioSegmentType] = []
@@ -697,9 +1072,7 @@ def main():
 
     try:
         for idx, seg in enumerate(segments):
-            logger.debug(
-                "Synthesize segment %d (%s) ...", seg.index, seg.speaker
-            )
+            logger.debug("Synthesize segment %d (%s) ...", seg.index, seg.speaker)
             audio = synthesizer.synthesize(seg.text, seg.speaker)
             logger.debug(
                 "Synthesized new audio for segment %d",
@@ -718,6 +1091,12 @@ def main():
     except KeyboardInterrupt:
         logger.warning("Interrupted by user – stopping synthesis early")
         return 1
+    except (SynthesisError, ValidationError, FFmpegError) as err:
+        logger.error("Processing failed: %s", err)
+        return 1
+    except Exception as err:
+        logger.error("Unexpected error during synthesis: %s", err)
+        return 1
 
     # Assemble final podcast
     combined = assembler.assemble(audio_segments, pauses_ms=pauses_ms)
@@ -730,6 +1109,27 @@ def main():
     vtt_path = final_dir / f"{base_name}.vtt"
     export_webvtt(segments, vtt_path)
     logger.info("VTT exported: %s", vtt_path)
+
+    # Video export if requested
+    if args.export_video:
+        if not args.image_file:
+            logger.error("--image-file required when --export-video is specified")
+            return 1
+
+        try:
+            validate_image_file(args.image_file)
+
+            video_path = final_dir / f"{base_name}.{args.video_format}"
+            success = create_video_with_static_image(
+                args.image_file, mp3_path, video_path, args.video_format
+            )
+
+            if not success:
+                logger.error("Video export failed")
+                return 1
+        except (ValidationError, FFmpegError) as err:
+            logger.error("Video processing failed: %s", err)
+            return 1
 
     return 0
 

@@ -17,132 +17,291 @@ class GenreCategorizer:
         """Initialize with predefined mappings."""
         self.genre_mappings = {
             # Rock Genres
-            'rock': [
-                'alternative rock', 'classic rock', 'grunge', 'hard rock',
-                'indie rock', 'post-punk', 'psych-rock', 'psychedelic rock',
-                'punk', 'rock', 'rock n roll', 'rock and roll', 'rockabilly',
-                'surf rock', 'garage rock', 'blues rock', 'folk rock',
-                'progressive rock', 'art rock', 'glam rock'
+            "rock": [
+                "alternative rock",
+                "classic rock",
+                "grunge",
+                "hard rock",
+                "indie rock",
+                "post-punk",
+                "psych-rock",
+                "psychedelic rock",
+                "punk",
+                "rock",
+                "rock n roll",
+                "rock and roll",
+                "rockabilly",
+                "surf rock",
+                "garage rock",
+                "blues rock",
+                "folk rock",
+                "progressive rock",
+                "art rock",
+                "glam rock",
             ],
-
             # Metal Genres
-            'metal': [
-                'acoustic metal', 'alternative metal', 'ambient metal', 'avant-garde metal',
-                'black metal', 'blackened death metal', 'celtic metal', 'chamber metal',
-                'christian metal', 'classic heavy metal', 'cyber metal', 'dark metal',
-                'death metal', 'doom metal', 'experimental metal', 'folk metal',
-                'funeral doom metal', 'gothic metal', 'groove metal', 'hair metal',
-                'heavy metal', 'horror metal', 'industrial metal', 'jazz metal',
-                'math metal', 'melodic death metal', 'metalcore', 'neo-classical metal',
-                'new wave of british heavy metal', 'nwobhm', 'noise metal', 'nu metal',
-                'power metal', 'post metal', 'progressive metal', 'screamo',
-                'sludge metal', 'speed metal', 'stoner metal', 'symphonic black metal',
-                'symphonic metal', 'technical death metal', 'thrash metal', 'viking metal'
+            "metal": [
+                "acoustic metal",
+                "alternative metal",
+                "ambient metal",
+                "avant-garde metal",
+                "black metal",
+                "blackened death metal",
+                "celtic metal",
+                "chamber metal",
+                "christian metal",
+                "classic heavy metal",
+                "cyber metal",
+                "dark metal",
+                "death metal",
+                "doom metal",
+                "experimental metal",
+                "folk metal",
+                "funeral doom metal",
+                "gothic metal",
+                "groove metal",
+                "hair metal",
+                "heavy metal",
+                "horror metal",
+                "industrial metal",
+                "jazz metal",
+                "math metal",
+                "melodic death metal",
+                "metalcore",
+                "neo-classical metal",
+                "new wave of british heavy metal",
+                "nwobhm",
+                "noise metal",
+                "nu metal",
+                "power metal",
+                "post metal",
+                "progressive metal",
+                "screamo",
+                "sludge metal",
+                "speed metal",
+                "stoner metal",
+                "symphonic black metal",
+                "symphonic metal",
+                "technical death metal",
+                "thrash metal",
+                "viking metal",
             ],
-
             # Pop Genres
-            'pop': [
-                'acoustic pop', 'cantopop', 'indie-pop', 'indie pop', 'j-pop',
-                'k-pop', 'mandopop', 'pop', 'poprock', 'pop rock', 'power-pop',
-                'power pop', 'synth-pop', 'synthpop', 'electropop', 'dance pop',
-                'teen pop', 'bubblegum pop'
+            "pop": [
+                "acoustic pop",
+                "cantopop",
+                "indie-pop",
+                "indie pop",
+                "j-pop",
+                "k-pop",
+                "mandopop",
+                "pop",
+                "poprock",
+                "pop rock",
+                "power-pop",
+                "power pop",
+                "synth-pop",
+                "synthpop",
+                "electropop",
+                "dance pop",
+                "teen pop",
+                "bubblegum pop",
             ],
-
             # Electronic & Dance
-            'electronic': [
-                'ambient', 'bass music', 'breakbeat', 'chicago house', 'chiptune',
-                'club', 'deep house', 'detroit techno', 'drum and bass', 'dnb',
-                'dubstep', 'eurodance', 'future bass', 'garage', 'hardstyle',
-                'house', 'j-dance', 'minimal techno', 'progressive house',
-                'synthwave', 'techno', 'trance', 'vaporwave', 'edm',
-                'electronic dance music', 'big beat', 'trip hop', 'trip-hop'
+            "electronic": [
+                "ambient",
+                "bass music",
+                "breakbeat",
+                "chicago house",
+                "chiptune",
+                "club",
+                "deep house",
+                "detroit techno",
+                "drum and bass",
+                "dnb",
+                "dubstep",
+                "eurodance",
+                "future bass",
+                "garage",
+                "hardstyle",
+                "house",
+                "j-dance",
+                "minimal techno",
+                "progressive house",
+                "synthwave",
+                "techno",
+                "trance",
+                "vaporwave",
+                "edm",
+                "electronic dance music",
+                "big beat",
+                "trip hop",
+                "trip-hop",
             ],
-
             # Hip Hop & Urban
-            'hip_hop': [
-                'german rap', 'deutschrap', 'hip hop', 'hip-hop', 'rap', 'trap',
-                'gangsta rap', 'conscious rap', 'old school hip hop', 'boom bap',
-                'mumble rap', 'cloud rap'
+            "hip_hop": [
+                "german rap",
+                "deutschrap",
+                "hip hop",
+                "hip-hop",
+                "rap",
+                "trap",
+                "gangsta rap",
+                "conscious rap",
+                "old school hip hop",
+                "boom bap",
+                "mumble rap",
+                "cloud rap",
             ],
-
             # R&B & Soul
-            'rnb_soul': [
-                'r&b', 'rnb', 'soul', 'neo soul', 'contemporary r&b', 'motown',
-                'northern soul', 'southern soul', 'funk soul'
+            "rnb_soul": [
+                "r&b",
+                "rnb",
+                "soul",
+                "neo soul",
+                "contemporary r&b",
+                "motown",
+                "northern soul",
+                "southern soul",
+                "funk soul",
             ],
-
             # Jazz
-            'jazz': [
-                'acid jazz', 'jazz', 'jazz fusion', 'smooth jazz', 'swing',
-                'bebop', 'cool jazz', 'free jazz', 'hard bop', 'latin jazz',
-                'modal jazz', 'post-bop', 'ragtime', 'big band'
+            "jazz": [
+                "acid jazz",
+                "jazz",
+                "jazz fusion",
+                "smooth jazz",
+                "swing",
+                "bebop",
+                "cool jazz",
+                "free jazz",
+                "hard bop",
+                "latin jazz",
+                "modal jazz",
+                "post-bop",
+                "ragtime",
+                "big band",
             ],
-
             # Blues & Country
-            'blues_country': [
-                'blues', 'bluegrass', 'country', 'delta blues', 'chicago blues',
-                'electric blues', 'country blues', 'alt-country', 'country rock',
-                'honky tonk', 'western swing', 'outlaw country'
+            "blues_country": [
+                "blues",
+                "bluegrass",
+                "country",
+                "delta blues",
+                "chicago blues",
+                "electric blues",
+                "country blues",
+                "alt-country",
+                "country rock",
+                "honky tonk",
+                "western swing",
+                "outlaw country",
             ],
-
             # Folk & World
-            'folk_world': [
-                'african music', 'afrobeat', 'balkan music', 'caribbean music',
-                'celtic music', 'celtic', 'folk', 'indie folk', 'indian music',
-                'middle eastern music', 'nordic folk', 'krautrock', 'world music',
-                'traditional folk', 'contemporary folk', 'americana'
+            "folk_world": [
+                "african music",
+                "afrobeat",
+                "balkan music",
+                "caribbean music",
+                "celtic music",
+                "celtic",
+                "folk",
+                "indie folk",
+                "indian music",
+                "middle eastern music",
+                "nordic folk",
+                "krautrock",
+                "world music",
+                "traditional folk",
+                "contemporary folk",
+                "americana",
             ],
-
             # Latin & Caribbean
-            'latin_caribbean': [
-                'bachata', 'bossa nova', 'cumbia', 'dancehall', 'forró',
-                'mambo', 'merengue', 'reggae', 'reggaeton', 'salsa',
-                'samba', 'sertanejo', 'tango', 'latin', 'calypso',
-                'son cubano', 'bolero', 'rumba'
+            "latin_caribbean": [
+                "bachata",
+                "bossa nova",
+                "cumbia",
+                "dancehall",
+                "forró",
+                "mambo",
+                "merengue",
+                "reggae",
+                "reggaeton",
+                "salsa",
+                "samba",
+                "sertanejo",
+                "tango",
+                "latin",
+                "calypso",
+                "son cubano",
+                "bolero",
+                "rumba",
             ],
-
             # Classical & Orchestral
-            'classical': [
-                'chamber music', 'classical', 'neo-classical', 'neoclassical',
-                'opera', 'orchestral', 'piano', 'baroque', 'romantic',
-                'contemporary classical', 'minimalism', 'string quartet'
+            "classical": [
+                "chamber music",
+                "classical",
+                "neo-classical",
+                "neoclassical",
+                "opera",
+                "orchestral",
+                "piano",
+                "baroque",
+                "romantic",
+                "contemporary classical",
+                "minimalism",
+                "string quartet",
             ],
-
             # Alternative & Experimental
-            'alternative_experimental': [
-                'ambient', 'avant-garde', 'downtempo', 'experimental', 'industrial',
-                'lo-fi', 'lofi', 'new age', 'noise', 'post hardcore', 'post-hardcore',
-                'shoegaze', 'drone', 'sound art', 'musique concrète'
+            "alternative_experimental": [
+                "ambient",
+                "avant-garde",
+                "downtempo",
+                "experimental",
+                "industrial",
+                "lo-fi",
+                "lofi",
+                "new age",
+                "noise",
+                "post hardcore",
+                "post-hardcore",
+                "shoegaze",
+                "drone",
+                "sound art",
+                "musique concrète",
             ],
-
             # Funk & Groove
-            'funk': [
-                'funk', 'groove', 'p-funk', 'funk rock', 'funk metal',
-                'acid funk', 'go-go'
-            ],
-
+            "funk": ["funk", "groove", "p-funk", "funk rock", "funk metal", "acid funk", "go-go"],
             # Gospel & Christian
-            'gospel_christian': [
-                'christian metal', 'gospel', 'contemporary christian',
-                'christian rock', 'praise and worship', 'southern gospel',
-                'black gospel'
+            "gospel_christian": [
+                "christian metal",
+                "gospel",
+                "contemporary christian",
+                "christian rock",
+                "praise and worship",
+                "southern gospel",
+                "black gospel",
             ],
-
             # Reggae & Ska
-            'reggae_ska': [
-                'reggae', 'ska', 'rocksteady', 'dub', 'reggae fusion',
-                'two tone', 'third wave ska'
-            ],
-
+            "reggae_ska": ["reggae", "ska", "rocksteady", "dub", "reggae fusion", "two tone", "third wave ska"],
             # Punk & Hardcore
-            'punk_hardcore': [
-                'punk', 'hardcore punk', 'post-punk', 'pop punk', 'pop-punk',
-                'street punk', 'crust punk', 'anarcho-punk', 'oi!',
-                'post hardcore', 'post-hardcore', 'screamo'
-            ]
+            "punk_hardcore": [
+                "punk",
+                "hardcore punk",
+                "post-punk",
+                "pop punk",
+                "pop-punk",
+                "street punk",
+                "crust punk",
+                "anarcho-punk",
+                "oi!",
+                "post hardcore",
+                "post-hardcore",
+                "screamo",
+            ],
         }
 
-    # Reverse mapping for fast lookup
+        # Reverse mapping for fast lookup
         self._create_reverse_mapping()
 
     def _create_reverse_mapping(self):
@@ -166,20 +325,20 @@ class GenreCategorizer:
 
         genre_clean = self._clean_genre_name(genre)
 
-    # Direct lookup
+        # Direct lookup
         if genre_clean in self.reverse_mapping:
             return self.reverse_mapping[genre_clean]
 
-    # Fuzzy matching for close variants
+        # Fuzzy matching for close variants
         return self._fuzzy_match(genre_clean)
 
     def _clean_genre_name(self, genre: str) -> str:
         """Normalize / clean a genre string for matching."""
         genre = genre.lower().strip()
-    # Remove special characters
-        genre = re.sub(r'[^\w\s-]', '', genre)
-    # Normalize whitespace
-        genre = re.sub(r'\s+', ' ', genre)
+        # Remove special characters
+        genre = re.sub(r"[^\w\s-]", "", genre)
+        # Normalize whitespace
+        genre = re.sub(r"\s+", " ", genre)
         return genre
 
     def _fuzzy_match(self, genre: str) -> Optional[str]:
@@ -190,33 +349,33 @@ class GenreCategorizer:
             if genre in known_genre or known_genre in genre:
                 return category
 
-    # Heuristic fallbacks for common tokens
-        if 'metal' in genre:
-            return 'metal'
-        elif 'rock' in genre:
-            return 'rock'
-        elif 'pop' in genre:
-            return 'pop'
-        elif 'jazz' in genre:
-            return 'jazz'
-        elif 'electronic' in genre or 'dance' in genre or 'house' in genre:
-            return 'electronic'
-        elif 'hip' in genre or 'rap' in genre:
-            return 'hip_hop'
-        elif 'folk' in genre:
-            return 'folk_world'
-        elif 'classical' in genre or 'orchestra' in genre:
-            return 'classical'
-        elif 'punk' in genre:
-            return 'punk_hardcore'
-        elif 'blues' in genre:
-            return 'blues_country'
-        elif 'country' in genre:
-            return 'blues_country'
-        elif 'reggae' in genre:
-            return 'reggae_ska'
-        elif 'funk' in genre:
-            return 'funk'
+        # Heuristic fallbacks for common tokens
+        if "metal" in genre:
+            return "metal"
+        elif "rock" in genre:
+            return "rock"
+        elif "pop" in genre:
+            return "pop"
+        elif "jazz" in genre:
+            return "jazz"
+        elif "electronic" in genre or "dance" in genre or "house" in genre:
+            return "electronic"
+        elif "hip" in genre or "rap" in genre:
+            return "hip_hop"
+        elif "folk" in genre:
+            return "folk_world"
+        elif "classical" in genre or "orchestra" in genre:
+            return "classical"
+        elif "punk" in genre:
+            return "punk_hardcore"
+        elif "blues" in genre:
+            return "blues_country"
+        elif "country" in genre:
+            return "blues_country"
+        elif "reggae" in genre:
+            return "reggae_ska"
+        elif "funk" in genre:
+            return "funk"
 
         return None
 
@@ -260,9 +419,18 @@ def main():
 
     # Demo test set
     test_genres = [
-        'Rock', 'Heavy Metal', 'Pop', 'Hip Hop', 'Jazz',
-        'Death Metal', 'Alternative Rock', 'Techno', 'Blues',
-        'Progressive Metal', 'Indie Pop', 'Drum and Bass'
+        "Rock",
+        "Heavy Metal",
+        "Pop",
+        "Hip Hop",
+        "Jazz",
+        "Death Metal",
+        "Alternative Rock",
+        "Techno",
+        "Blues",
+        "Progressive Metal",
+        "Indie Pop",
+        "Drum and Bass",
     ]
 
     print("Genre categorization test:")

@@ -1,11 +1,10 @@
-import os
 import sys
-import pytest
+from pathlib import Path
 
-# Ensure project root is on sys.path so tests can import the module directly
-ROOT = os.path.dirname(os.path.dirname(__file__))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
+# Ensure project root is on sys.path so tests can import module directly
+ROOT = Path(__file__).parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from utils.image_utils import compute_contain_size
 

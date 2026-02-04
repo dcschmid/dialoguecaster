@@ -1,4 +1,14 @@
 import unittest
+import sys
+from pathlib import Path
+
+# Ensure project root is on sys.path
+ROOT = Path(__file__).parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from sorting import sorting_algorithm
+
 
 class TestSortingAlgorithm(unittest.TestCase):
     def test_sorting_algorithm(self):
@@ -18,8 +28,8 @@ class TestSortingAlgorithm(unittest.TestCase):
         self.assertEqual(sorting_algorithm(input_list), expected_output)
 
         # Test with a list of strings
-        input_list = ['banana', 'apple', 'cherry']
-        expected_output = ['apple', 'banana', 'cherry']
+        input_list = ["banana", "apple", "cherry"]
+        expected_output = ["apple", "banana", "cherry"]
         self.assertEqual(sorting_algorithm(input_list), expected_output)
 
         # Test with a list of floats
@@ -27,5 +37,6 @@ class TestSortingAlgorithm(unittest.TestCase):
         expected_output = [1.2, 2.7, 3.5, 4.1]
         self.assertEqual(sorting_algorithm(input_list), expected_output)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     unittest.main()
