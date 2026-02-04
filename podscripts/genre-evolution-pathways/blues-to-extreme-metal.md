@@ -58,11 +58,11 @@ daniel: What’s important is that none of this is accidental. These artists are
 
 annabelle: So rhythm and blues isn’t a detour. It’s the first moment where emotional intensity learns how to organize itself. Without this phase, rock wouldn’t have a skeleton to build on. And without that skeleton, metal would never stand upright.
 
-daniel: At a certain point, the rhythm gets lighter on its feet, but sharper in intent. That’s where someone like Chuck Berry matters so much. He doesn’t just speed things up. He reorganizes attention. Guitar riffs become statements, not decoration, and lyrics start driving identity, not just mood.
+daniel: At a certain point, the rhythm gets lighter on its feet, but sharper in intent. That’s where someone like Chuck Berry matters so much. He doesn’t just speed things up. He shifts focus. Guitar riffs become statements, not decoration, and lyrics start driving identity, not just mood.
 
 annabelle: And Chuck Berry’s importance isn’t just musical. It’s structural. He centers the guitar as narrator. That’s huge. Once the guitar carries story and attitude, it opens a path all the way to metal. Even the most extreme riffs still carry that idea, that the guitar speaks with intent, not just texture.
 
-daniel: At the same time, Little Richard explodes another boundary. His voice is wild, theatrical, unapologetic. But it’s controlled chaos. He shows that intensity can be joyful and dangerous at once. Later metal vocalists who move between clarity and distortion are still negotiating that space he opened.
+daniel: At the same time, Little Richard approaches vocals differently. His voice is wild, theatrical, unapologetic. But it’s controlled chaos. He shows that intensity can be joyful and dangerous at once. Later metal vocalists who move between clarity and distortion are still negotiating that space he opened.
 
 annabelle: And we can’t skip Sister Rosetta Tharpe here. She was among the first popular recording artists to use heavy distortion on electric guitar, before rock has a name. She proves that heaviness doesn’t belong to one gender or one scene. Her playing carries authority, swing, and power in equal measure, long before the industry is ready to recognize it.
 
@@ -70,7 +70,7 @@ daniel: What rock ’n’ roll really does is accelerate the conversation. It co
 
 annabelle: So by the time this phase settles, the ingredients are all there. Volume, attitude, structure, and risk. The music is no longer just surviving. It’s challenging space. And once music starts challenging space, it inevitably starts getting heavier.
 
-daniel: By the time rock ’n’ roll settles into the public ear, it’s already carrying conflict. Not rebellion in a romantic sense, but friction. The music moves faster, yes, but it’s also being watched, filtered, reshaped. Chuck Berry is still central here because his songwriting sharpens identity under pressure.
+daniel: By the time rock ’n’ roll settles into the public ear, it’s already carrying conflict. Not rebellion in a romantic sense, but friction. The music moves faster, yes, but it’s also being watched, filtered, reshaped. Chuck Berry remains important here because his songwriting sharpens identity under pressure.
 
 annabelle: And what Chuck Berry achieves is balance. His songs sound light, but they’re disciplined. Tight structures, precise riffs, lyrics that move quickly. That discipline is important. Heavy music later depends on it. Without that kind of internal control, speed just collapses. Rock ’n’ roll learns early how to keep momentum without losing form.
 
@@ -84,7 +84,7 @@ annabelle: So this moment isn’t about freedom breaking loose. It’s about mus
 
 daniel: As rock keeps spreading, something subtle happens. The songs start to carry expectation. Audiences want energy, movement, release. That pressure shapes how musicians play. The backbeat gets heavier, the guitar tone rougher. Rock isn’t just being heard anymore, it’s being felt in the body, and that physical demand starts to reshape the sound.
 
-annabelle: This is where Little Richard remains essential. His performances are explosive, but never sloppy. Every scream is placed. Every piano hit drives the rhythm forward. He shows that intensity works best when it’s framed. Later heavy music takes that lesson seriously, especially when chaos threatens to take over.
+annabelle: This is where Little Richard is often noted for. His performances are explosive, but never sloppy. Every scream is placed. Every piano hit drives the rhythm forward. He shows that intensity works best when it’s framed. Later heavy music takes that lesson seriously, especially when chaos threatens to take over.
 
 daniel: There’s also an emerging idea of performance as confrontation. Rock ’n’ roll doesn’t just entertain, it challenges norms of behavior, sexuality, and presence. That challenge creates resistance, and resistance hardens sound. Musicians learn that volume can be protection as much as expression. That’s a mindset metal later inherits directly.
 
