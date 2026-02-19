@@ -1,27 +1,18 @@
 # ==========================
-# Melody Mind - Supertonic TTS
+# DialogueCaster - KOKORO-TTS (hexgrad/kokoro)
 # ==========================
+#
+# IMPORTANT: Requires Python 3.10-3.12
+# Python 3.13+ is NOT supported by kokoro
+#
 
-# --- CORE ---
-supertonic>=1.0.0
-onnxruntime>=1.23.1
-numpy>=1.24.0,<2.0  # supertonic requires <2.0
+# --- TTS ENGINE ---
+kokoro>=0.9.4
+misaki[en]>=0.9.4  # English G2P
 
 # --- AUDIO PROCESSING ---
 pydub>=0.25.1
-soundfile>=0.12.1,<0.14
-librosa>=0.10.1,<0.12
-
-# --- IMAGE / COVER HANDLING ---
-Pillow>=11.0.0,<12.0.0
+soundfile>=0.12.1
 
 # --- UTILITIES ---
 python-dotenv>=1.0.0
-requests>=2.31.0
-tqdm>=4.64.0
-
-# --- OPTIONAL (WEB UI / TOOLS) ---
-flask>=2.3.0
-
-# --- TESTING (OPTIONAL) ---
-pytest>=7.0.0

@@ -37,14 +37,6 @@ venv.bak/
 *.swo
 *~
 
-# Project specific
-temp/
-output/
-*.wav
-*.mp3
-!audio_samples/*.wav
-!examples/*.wav
-
 # System files
 .DS_Store
 .DS_Store?
@@ -58,10 +50,6 @@ Thumbs.db
 *.log
 logs/
 
-# Model cache
-.cache/
-models/
-
 # Jupyter Notebooks
 .ipynb_checkpoints
 
@@ -69,14 +57,25 @@ models/
 *.pth
 *.pt
 
-# TTS Models (downloaded automatically)
+# Model cache
+.cache/
+models/
 tts_models/
+kokoro_models/
 
+# Project specific
+temp/
 output/
 movies/
-podcast-tts-env/
-output_chatterbox_real/
-supertonic_env/
-output_new
-
 dia/
+
+# Audio files (except project audio)
+*.wav
+*.mp3
+!audio/*.mp3
+!audio_samples/*.wav
+!examples/*.wav
+
+# Temporary test directories
+test_*/
+/tmp/

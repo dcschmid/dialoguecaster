@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
-"""Local Podcast Pipeline (Supertonic Edition)
----------------------------------------------
+"""DialogueCaster - Podcast Generator with KOKORO-TTS
+----------------------------------------------------
 
-Standalone script using Supertonic to convert
-Markdown dialogue scripts into audio (WAV/MP3) plus WebVTT subtitles.
+Convert Markdown dialogue scripts into audio (MP3) plus WebVTT subtitles.
 
-- 100% local with Supertonic (ONNX Runtime)
-- Language: English (default)
+- 100% local with KOKORO-TTS (hexgrad/kokoro)
+- Language: US English
 - Dialogue format: "Name: Text" per line
 - Configurable pauses between segments
-- Outputs: MP3 + .vtt (+ optional per-segment WAV; intro/outro music supported)
+- Outputs: MP3 + .vtt
 """
 
 from __future__ import annotations
@@ -23,78 +22,134 @@ import re
 import random
 import logging
 import warnings
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import (
-    Dict,
-    List,
-    Optional,
-    TYPE_CHECKING,
-    Any,
-    Literal,
-    TypedDict,
-)
+from typing import Dict, List, Optional, TYPE_CHECKING, Any, TypedDict
 from dotenv import load_dotenv
 import json
-import numpy as np
+
+# Optional imports for audio processing
+AudioSegment = None
+try:
+    from pydub import AudioSegment
+except Exception:
+    AudioSegment = None
+
+# KOKORO-TTS (hexgrad/kokoro) - Primary TTS Backend
+HAS_KOKORO = False
+KOKORO_IMPORT_ERROR: Optional[Exception] = None
+KPipeline = None
+sf = None
+np = None
+try:
+    from kokoro import KPipeline as _KPipeline
+    import numpy as _np
+    import soundfile as _sf
+
+    HAS_KOKORO = True
+    KPipeline = _KPipeline
+    sf = _sf
+    np = _np
+except Exception as err:
+    KOKORO_IMPORT_ERROR = err
 
 
 # Custom Exception Hierarchy
 class DialogueCasterError(Exception):
     """Base exception for DialogueCaster application."""
+
     pass
 
 
 class ConfigurationError(DialogueCasterError):
     """Raised when there's a configuration problem."""
+
     pass
 
 
 class SynthesisError(DialogueCasterError):
     """Raised when audio synthesis fails."""
+
     pass
 
 
 class ValidationError(DialogueCasterError):
     """Raised when input validation fails."""
-    pass
 
-
-class FFmpegError(DialogueCasterError):
-    """Raised when FFmpeg operations fail."""
     pass
 
 
 class DependencyError(DialogueCasterError):
     """Raised when required dependencies are missing."""
-    pass
-import subprocess
-from PIL import Image
 
-AudioSegment: Any = None
-try:
-    from pydub import AudioSegment  # For combining segments & MP3 export
-except Exception:  # pragma: no cover
-    AudioSegment = None
+    pass
+
+
+# Text normalization mappings
+# Applied for all text (safe punctuation normalization)
+COMMON_REPLACEMENTS = {
+    "\u201c": '"',  # left double quote (")
+    "\u201d": '"',  # right double quote (")
+    "\u2018": "'",  # left single quote (')
+    "\u2019": "'",  # right single quote (')
+    "\u201b": "'",  # apostrophe (')
+    "\u2013": "-",  # en dash (–)
+    "\u2014": "-",  # em dash (—)
+    "\u2026": "...",  # ellipsis (…)
+    "\u20ac": "Euro",  # euro sign (€)
+    "\u00a3": "pounds",  # pound sign (£)
+    "\u00a9": "(c)",  # copyright (©)
+    "\u00ae": "(r)",  # registered trademark (®)
+    "\u2122": "(tm)",  # trademark (™)
+}
+
+# Applied only for ASCII-only synthesis
+ASCII_ONLY_REPLACEMENTS = {
+    "\u00f0": "th",  # eth (ð)
+    "\u00fe": "th",  # thorn (þ)
+    "\u00e6": "ae",  # ash (æ)
+    "\u0153": "oe",  # oe ligature (œ)
+    "\u00f8": "o",  # o with stroke (ø)
+    "\u00e5": "a",  # a with ring (å)
+    "\u00e4": "ae",  # a umlaut (ä)
+    "\u00f6": "oe",  # o umlaut (ö)
+    "\u00fc": "ue",  # u umlaut (ü)
+    "\u00df": "ss",  # eszett (ß)
+}
+
+# Pre-compiled translation table for O(n) text normalization
+_COMMON_TRANSLATION_TABLE = str.maketrans(COMMON_REPLACEMENTS)
+_ASCII_TRANSLATION_TABLE = str.maketrans(ASCII_ONLY_REPLACEMENTS)
+
+
+def normalize_text(text: str, ascii_only: bool = True) -> str:
+    """Normalize text by replacing unsupported characters with ASCII equivalents.
+
+    Uses pre-compiled translation table for O(n) performance.
+
+    Args:
+        text: Input text to normalize
+        ascii_only: If True, force ASCII-safe output (for English pipelines)
+
+    Returns:
+        Normalized ASCII text
+    """
+    # Always normalize punctuation/symbols first.
+    normalized = text.translate(_COMMON_TRANSLATION_TABLE)
+
+    if not ascii_only:
+        return normalized
+
+    # ASCII-only mode for strict pipelines.
+    normalized = normalized.translate(_ASCII_TRANSLATION_TABLE)
+    return "".join(char if ord(char) < 128 else " " for char in normalized)
+
 
 if TYPE_CHECKING:
     from pydub import AudioSegment as AudioSegmentType
-    from supertonic import TTS
 else:
     AudioSegmentType = Any
-    TTS = Any
-
-# Supertonic (ONNX Runtime)
-HAS_SUPERTONIC = False
-SUPERTONIC_IMPORT_ERROR: Optional[Exception] = None
-try:  # pragma: no cover
-    from supertonic import TTS as _TTS_Runtime
-
-    HAS_SUPERTONIC = True
-    if not TYPE_CHECKING:
-        TTS = _TTS_Runtime
-except Exception as err:  # pragma: no cover
-    SUPERTONIC_IMPORT_ERROR = err
 
 # Logging Setup
 LOG_LEVEL = os.getenv("CHATTERBOX_LOG_LEVEL", "INFO").upper()
@@ -103,14 +158,17 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
-logger = logging.getLogger("supertonic_podcast_tts")
+logger = logging.getLogger("dialoguecaster")
 
-SUPPORTED_LANGS = {"en"}
 DEFAULT_LANGUAGE = "en"
-MIN_PYTHON = (3, 11, 0)
-SUPERTONIC_SAMPLE_RATE_FALLBACK = 24000
-DEFAULT_MALE_VOICE = "M3"
-DEFAULT_FEMALE_VOICE = "F3"
+DEFAULT_LANGUAGE_NAME = "English (US)"
+DEFAULT_LANG_CODE = "a"
+DEFAULT_SAMPLE_RATE = 24000
+MIN_PYTHON = (3, 10, 0)  # Minimum Python version for KOKORO-TTS
+
+BEST_VOICES = {"male": "am_michael", "female": "af_heart"}
+DEFAULT_MALE_VOICE = "am_michael"
+DEFAULT_FEMALE_VOICE = "af_heart"
 DEFAULT_MALE_ALIASES = ["daniel", "male", "host"]
 DEFAULT_FEMALE_ALIASES = ["annabelle", "female", "guest"]
 
@@ -120,6 +178,7 @@ SPEAKER_LINE = re.compile(r"^([A-Za-z0-9_ÄÖÜäöüß\- ]{1,40}):\s*(.*)$")
 
 class VoiceStyleConfig(TypedDict, total=False):
     """Configuration for voice style mapping."""
+
     voice: str
     id: str
     name: str
@@ -127,48 +186,55 @@ class VoiceStyleConfig(TypedDict, total=False):
 
 class SpeedConfig(TypedDict):
     """Configuration for speaker speed mapping."""
+
     speed: float
 
 
 class AudioSegmentCache:
     """Cache for audio segments to avoid re-synthesis."""
-    
+
     def __init__(self, cache_dir: Path):
         self.cache_dir = cache_dir
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-    
+
     def _get_cache_key(self, text: str, speaker: str, voice: str, speed: float) -> str:
         """Generate cache key based on content and parameters."""
         content = f"{text}|{speaker}|{voice}|{speed}"
-        return hashlib.md5(content.encode('utf-8')).hexdigest()
-    
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
     def get_cached_segment(self, text: str, speaker: str, voice: str, speed: float) -> Optional[AudioSegmentType]:
         """Get cached audio segment if available."""
         cache_key = self._get_cache_key(text, speaker, voice, speed)
         cache_file = self.cache_dir / f"{cache_key}.wav"
-        
-        if cache_file.exists():
+
+        if cache_file.exists() and AudioSegment is not None:
             try:
-                if AudioSegment is not None:
-                    return AudioSegment.from_file(str(cache_file))
+                return AudioSegment.from_file(str(cache_file))
             except Exception as err:
                 logger.debug("Failed to load cached segment: %s", err)
         return None
-    
+
     def cache_segment(self, text: str, speaker: str, voice: str, speed: float, segment: AudioSegmentType) -> None:
         """Cache an audio segment."""
         if AudioSegment is None:
             return
-            
+
         cache_key = self._get_cache_key(text, speaker, voice, speed)
         cache_file = self.cache_dir / f"{cache_key}.wav"
-        
+        temp_file = self.cache_dir / f".{cache_key}.tmp.wav"
+
         try:
-            segment.export(str(cache_file), format="wav")
+            segment.export(str(temp_file), format="wav")
+            os.replace(temp_file, cache_file)
             logger.debug("Cached segment: %s", cache_key[:8])
         except Exception as err:
             logger.debug("Failed to cache segment: %s", err)
-    
+            if temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except Exception:
+                    pass
+
     def clear_cache(self) -> None:
         """Clear all cached segments."""
         if self.cache_dir.exists():
@@ -231,21 +297,39 @@ class MarkdownDialogueParser:
         return segments
 
 
-def load_speaker_voice_map(path_str: Optional[str], required: bool = False) -> Dict[str, str]:
-    """JSON: { "daniel": "M3", "annabelle": "F3" }"""
+def _load_json_mapping(path_str: Optional[str], name: str, required: bool = False) -> Dict:
+    """Generic JSON mapping loader.
+
+    Args:
+        path_str: Path to JSON file
+        name: Human-readable name for error messages
+        required: If True, raise error when file not found
+
+    Returns:
+        Parsed JSON dict or empty dict
+    """
     if not path_str:
         return {}
     path = Path(path_str)
     if not path.exists():
         if required:
-            raise FileNotFoundError(f"Supertonic voice JSON missing: {path}")
+            raise FileNotFoundError(f"{name} JSON missing: {path}")
         return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as err:
-        raise ValueError(f"Supertonic voice JSON invalid: {err}") from err
+        raise ValueError(f"{name} JSON invalid: {err}") from err
     if not isinstance(data, dict):
-        raise ValueError("Supertonic voice JSON must contain an object mapping")
+        raise ValueError(f"{name} JSON must contain an object mapping")
+    return data
+
+
+def load_speaker_voice_map(path_str: Optional[str], required: bool = False) -> Dict[str, str]:
+    """Load speaker voice mapping from JSON file.
+
+    JSON format: { "daniel": "am_michael", "annabelle": "af_heart" }
+    """
+    data = _load_json_mapping(path_str, "Voice", required)
     result: Dict[str, str] = {}
     for key, value in data.items():
         if not isinstance(key, str):
@@ -261,23 +345,16 @@ def load_speaker_voice_map(path_str: Optional[str], required: bool = False) -> D
         if voice:
             result[key.lower()] = voice
     if result:
-        logger.info("Supertonic voices loaded for: %s", ", ".join(sorted(result.keys())))
+        logger.info("Voices loaded for: %s", ", ".join(sorted(result.keys())))
     return result
 
 
 def load_speaker_speed_map(path_str: Optional[str]) -> Dict[str, float]:
-    """JSON: { "daniel": 0.94, "annabelle": 0.92 }"""
-    if not path_str:
-        return {}
-    path = Path(path_str)
-    if not path.exists():
-        raise FileNotFoundError(f"Supertonic speed JSON missing: {path}")
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as err:
-        raise ValueError(f"Supertonic speed JSON invalid: {err}") from err
-    if not isinstance(data, dict):
-        raise ValueError("Supertonic speed JSON must contain an object mapping")
+    """Load speaker speed mapping from JSON file.
+
+    JSON format: { "daniel": 0.95, "annabelle": 1.05 }
+    """
+    data = _load_json_mapping(path_str, "Speed", required=False)
     result: Dict[str, float] = {}
     for key, value in data.items():
         if not isinstance(key, str):
@@ -289,21 +366,20 @@ def load_speaker_speed_map(path_str: Optional[str]) -> Dict[str, float]:
         if speed_val > 0:
             result[key.lower()] = speed_val
     if result:
-        logger.info("Supertonic speeds loaded for: %s", ", ".join(sorted(result.keys())))
+        logger.info("Speeds loaded for: %s", ", ".join(sorted(result.keys())))
     return result
 
 
 def build_speaker_mapping(
-    language: str,
     overrides: Optional[Dict[str, str]],
-    default_male: str = DEFAULT_MALE_VOICE,
-    default_female: str = DEFAULT_FEMALE_VOICE,
+    default_male: Optional[str] = None,
+    default_female: Optional[str] = None,
     male_aliases: Optional[List[str]] = None,
     female_aliases: Optional[List[str]] = None,
 ) -> Dict[str, str]:
-    """Return speaker -> Supertonic voice style mapping with sensible defaults."""
-    default_male = (default_male or DEFAULT_MALE_VOICE).upper()
-    default_female = (default_female or DEFAULT_FEMALE_VOICE).upper()
+    """Return speaker -> voice mapping with sensible defaults."""
+    default_male = default_male or BEST_VOICES["male"]
+    default_female = default_female or BEST_VOICES["female"]
     male_aliases = male_aliases or DEFAULT_MALE_ALIASES
     female_aliases = female_aliases or DEFAULT_FEMALE_ALIASES
 
@@ -355,27 +431,28 @@ def parse_aliases(raw: Optional[str], defaults: List[str]) -> List[str]:
     return aliases or defaults
 
 
-class SupertonicSynthesizer:
-    """Supertonic wrapper with a mock fallback."""
+class KokoroSynthesizer:
+    """KOKORO-TTS wrapper for US English synthesis."""
 
     def __init__(
         self,
-        default_voice: str,
+        default_voice: Optional[str],
         speed: float,
-        total_steps: int,
-        max_chunk_length: int,
-        silence_duration: float,
-        mock: bool,
         speaker_voice_map: Dict[str, str],
         speaker_speed_map: Optional[Dict[str, float]] = None,
         cache_dir: Optional[Path] = None,
+        mock: bool = False,
     ):
-        self.sample_rate = SUPERTONIC_SAMPLE_RATE_FALLBACK
-        self.default_voice = (default_voice or DEFAULT_MALE_VOICE).upper()
+        self.sample_rate = 24000  # KOKORO-TTS sample rate
+
+        self.lang_code = DEFAULT_LANG_CODE
+        self.default_male_voice = BEST_VOICES["male"]
+        self.default_female_voice = BEST_VOICES["female"]
+        self.default_voice = default_voice or self.default_male_voice
+
         self.speed = speed
-        self.total_steps = total_steps
-        self.max_chunk_length = max_chunk_length
-        self.silence_duration = silence_duration
+        self.mock = mock or not HAS_KOKORO
+
         self.speaker_voice_map = {k.lower(): v for k, v in speaker_voice_map.items()}
         self.speaker_speed_map: Dict[str, float] = {}
         for key, value in (speaker_speed_map or {}).items():
@@ -385,113 +462,233 @@ class SupertonicSynthesizer:
                 continue
             if speed_val > 0:
                 self.speaker_speed_map[key.lower()] = speed_val
-        self.mock = mock or not HAS_SUPERTONIC
-        self.tts: Optional[TTS] = None
-        self.style_cache: Dict[str, Any] = {}
-        
+
         # Initialize audio cache
         if cache_dir:
             self.cache = AudioSegmentCache(cache_dir)
         else:
             self.cache = None
 
-        if not self.mock:
-            try:
-                self.tts = TTS(auto_download=True)
-                self.sample_rate = int(getattr(self.tts, "sample_rate", SUPERTONIC_SAMPLE_RATE_FALLBACK))
-                logger.info(
-                    "Supertonic ready (default voice=%s, sample_rate=%s)",
-                    self.default_voice,
-                    self.sample_rate,
-                )
-            except Exception as err:  # pragma: no cover
-                logger.error("Supertonic init failed (%s)", err)
-                self.mock = True
-                self.tts = None
+        # Initialize KPipeline (lazy - only when needed)
+        self._pipeline = None
 
-        if self.mock and not mock and HAS_SUPERTONIC:
-            logger.warning("Supertonic backend unavailable or init failed – using mock silence.")
+        if self.mock and not mock:
+            logger.warning("KOKORO-TTS backend unavailable – using mock silence.")
+            if KOKORO_IMPORT_ERROR:
+                logger.warning("Install with: pip install kokoro>=0.9.4")
+        else:
+            logger.info(
+                "KOKORO-TTS ready (language=%s, lang_code=%s, male=%s, female=%s)",
+                DEFAULT_LANGUAGE_NAME,
+                self.lang_code,
+                self.default_male_voice,
+                self.default_female_voice,
+            )
+
+    @property
+    def pipeline(self):
+        """Lazy initialization of KPipeline."""
+        if self._pipeline is None and not self.mock and KPipeline is not None:
+            logger.info("Initializing KPipeline with lang_code='%s'", self.lang_code)
+            self._pipeline = KPipeline(lang_code=self.lang_code)
+        return self._pipeline
 
     def synthesize(self, text: str, speaker_name: str) -> AudioSegmentType:
-        if not text.strip():
+        """Synthesize audio from text using KOKORO-TTS."""
+        # English-only mode uses ASCII-safe text normalization.
+        ascii_only = True
+        normalized_text = normalize_text(text, ascii_only=ascii_only)
+
+        if not normalized_text.strip():
+            logger.debug("Empty text after normalization, returning silence")
+            require_audio()
             return AudioSegment.silent(duration=250)
-        
-        voice_choice = self._voice_for_speaker(speaker_name)
+
+        # Skip text that contains only symbols/punctuation (no speakable content)
+        if not any(c.isalnum() for c in normalized_text):
+            logger.debug("Text contains only symbols, returning silence: %s", normalized_text[:50])
+            require_audio()
+            return AudioSegment.silent(duration=100)
+
+        # Warn about very long segments (may be slow)
+        if len(normalized_text) > 2000:
+            logger.warning(
+                "Long segment detected (%d chars for speaker '%s') - synthesis may be slow",
+                len(normalized_text),
+                speaker_name,
+            )
+
+        voice_key = self._voice_for_speaker(speaker_name)
         spk = (speaker_name or "").strip().lower()
         speed = self.speaker_speed_map.get(spk, self.speed)
-        
-        # Check cache first
+
+        # Check cache first (use normalized text for cache key)
         if self.cache and not self.mock:
-            cached_segment = self.cache.get_cached_segment(text, spk, voice_choice, speed)
+            cached_segment = self.cache.get_cached_segment(normalized_text, spk, voice_key, speed)
             if cached_segment:
                 logger.debug("Using cached segment for %s", spk)
                 return cached_segment
-        
-        if self.mock or self.tts is None:
-            audio = self._mock_audio(text)
+
+        if self.mock:
+            audio = self._mock_audio(normalized_text)
         else:
             try:
-                style = self._style_for_voice(voice_choice)
-                wav, _ = self.tts.synthesize(
-                    text,
-                    voice_style=style,
-                    total_steps=self.total_steps,
-                    speed=speed,
-                    max_chunk_length=self.max_chunk_length,
-                    silence_duration=self.silence_duration,
+                logger.debug(
+                    "Synthesizing: speaker='%s', voice='%s', lang='%s', text_len=%d",
+                    speaker_name,
+                    voice_key,
+                    self.lang_code,
+                    len(normalized_text),
                 )
-                audio = self._numpy_audio_to_segment(wav)
+                audio = self._synthesize_direct(normalized_text, voice_key, speed)
             except Exception as err:
-                raise SynthesisError(
-                    f"Supertonic synthesis failed for {speaker_name or 'unknown'}: {err}"
-                ) from err
-        
-        # Cache the synthesized segment
+                logger.error("Synthesis failed for speaker '%s' with voice '%s': %s", speaker_name, voice_key, err)
+                raise SynthesisError(f"KOKORO-TTS synthesis failed for {speaker_name or 'unknown'}: {err}") from err
+
+        # Cache synthesized segment (using normalized text)
         if self.cache and not self.mock:
-            self.cache.cache_segment(text, spk, voice_choice, speed, audio)
-        
+            self.cache.cache_segment(normalized_text, spk, voice_key, speed, audio)
+
         return audio
 
-    def _voice_for_speaker(self, speaker_name: Optional[str]) -> str:
-        if self.speaker_voice_map:
-            return derive_speaker_key(speaker_name or "", self.speaker_voice_map)
-        return self.default_voice
+    def _synthesize_direct(self, text: str, voice: str, speed: float) -> AudioSegmentType:
+        """Synthesize audio directly using KPipeline (no subprocess!)."""
+        require_audio()
 
-    def _style_for_voice(self, voice_name: str):
-        if self.tts is None:
-            raise RuntimeError("TTS backend not initialized")
-        key = (voice_name or self.default_voice).upper()
-        if key in self.style_cache:
-            return self.style_cache[key]
+        if self.pipeline is None:
+            raise SynthesisError("KPipeline not initialized")
+
+        # Use temp file for audio output
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp_path = tmp.name
+
         try:
-            style = self.tts.get_voice_style(key)
-        except Exception as err:
-            if key != self.default_voice:
-                logger.warning(
-                    "Voice style %s unavailable (%s) – falling back to %s",
-                    key,
-                    err,
-                    self.default_voice,
-                )
-                return self._style_for_voice(self.default_voice)
-            raise
-        self.style_cache[key] = style
-        return style
+            # Generate audio using KPipeline
+            logger.debug("Calling pipeline with voice='%s', speed=%.2f", voice, speed)
+            audio_segments = []
+            for i, result in enumerate(self.pipeline(text, voice=voice, speed=speed)):
+                if result.audio is not None:
+                    audio_segments.append(result.audio)
+                else:
+                    logger.debug(
+                        "Segment %d returned no audio (text: %s)",
+                        i,
+                        result.graphemes if hasattr(result, "graphemes") else "N/A",
+                    )
 
-    def _numpy_audio_to_segment(self, wav: Any) -> AudioSegmentType:
-        wav_np = np.asarray(wav, dtype=np.float32)
-        wav_np = np.squeeze(wav_np)
-        wav_np = np.nan_to_num(wav_np, nan=0.0, posinf=1.0, neginf=-1.0)
-        wav_np = np.clip(wav_np, -1.0, 1.0)
-        audio_int16 = (wav_np * 32767).astype(np.int16)
-        return AudioSegment(
-            audio_int16.tobytes(),
-            frame_rate=self.sample_rate,
-            sample_width=2,
-            channels=1,
-        )
+            if not audio_segments:
+                # Provide more context for debugging
+                logger.error(
+                    "No audio generated (len=%d, voice=%s, text_sha256=%s)",
+                    len(text),
+                    voice,
+                    hashlib.sha256(text.encode("utf-8")).hexdigest()[:12],
+                )
+                raise SynthesisError(f"No audio generated for voice '{voice}'. Text may be empty or voice unavailable.")
+
+            # Concatenate all segments and save to temp file
+            if sf is None or np is None:
+                raise DependencyError("soundfile or numpy not available")
+
+            combined_audio = np.concatenate(audio_segments)
+            sf.write(tmp_path, combined_audio, self.sample_rate)
+
+            # Load as AudioSegment
+            audio = AudioSegment.from_wav(tmp_path)
+            return audio
+
+        finally:
+            # Clean up temp file
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+    def _voice_for_speaker(self, speaker_name: Optional[str]) -> str:
+        """Pick the best voice for a speaker based on language and gender detection."""
+        normalized = (speaker_name or "").strip().lower()
+
+        # 1. Check explicit voice mapping first
+        if self.speaker_voice_map and normalized in self.speaker_voice_map:
+            return self.speaker_voice_map[normalized]
+
+        # 2. Detect gender from speaker name and use best voice for language
+        if self._is_female_speaker(normalized):
+            return self.default_female_voice
+        else:
+            return self.default_male_voice
+
+    def _is_female_speaker(self, speaker_name: str) -> bool:
+        """Detect if a speaker name indicates female gender."""
+        female_markers = [
+            "female",
+            "woman",
+            "girl",
+            "lady",
+            "mrs",
+            "ms",
+            "miss",
+            "her",
+            "she",
+            "annabelle",
+            "sarah",
+            "emma",
+            "jessica",
+            "nicole",
+            "sara",
+            "dora",
+            "alice",
+            "lily",
+            "isabella",
+            "bella",
+            "sophia",
+            "olivia",
+            "xiaoxiao",
+            "xiaoni",
+            "alpha",
+            "nezumi",
+            "siwis",
+            "heart",  # af_heart is the best female voice
+        ]
+        male_markers = [
+            "male",
+            "man",
+            "boy",
+            "mr",
+            "his",
+            "him",
+            "he",
+            "sir",
+            "daniel",
+            "michael",
+            "george",
+            "alex",
+            "nicola",
+            "kumo",
+            "eric",
+            "liam",
+            "fable",
+            "lewis",
+            "santa",
+            "puck",
+            "echo",
+            "omega",
+            "yunxi",
+        ]
+
+        speaker_lower = speaker_name.lower()
+
+        # Check for female markers
+        for marker in female_markers:
+            if marker in speaker_lower:
+                # But exclude if male marker is also present
+                has_male = any(m in speaker_lower for m in male_markers)
+                if not has_male:
+                    return True
+
+        return False
 
     def _mock_audio(self, text: str) -> AudioSegmentType:
+        """Generate mock audio (silence)."""
+        require_audio()
         words = max(1, len(text.split()))
         seconds = min(8.0, 0.5 * words)
         return AudioSegment.silent(duration=int(seconds * 1000))
@@ -510,6 +707,7 @@ class PodcastAssembler:
     def assemble(
         self, segments_audio: List[AudioSegmentType], pauses_ms: Optional[List[int]] = None
     ) -> AudioSegmentType:
+        require_audio()
         total = AudioSegment.silent(duration=0)
         first = True
         pause_iter = iter(pauses_ms or [])
@@ -522,7 +720,65 @@ class PodcastAssembler:
         return total
 
 
-def export_webvtt(segments: List[Segment], path: Path):
+def require_audio() -> None:
+    """Raise DependencyError if pydub AudioSegment is not available."""
+    if AudioSegment is None:
+        raise DependencyError("pydub not available – install requirements via `pip install -r requirements.txt`")
+
+
+def load_audio_file(
+    audio_path: str,
+    combined: AudioSegmentType,
+    prepend: bool = True,
+    disabled: bool = False,
+    log_name: str = "audio",
+) -> tuple[AudioSegmentType, float]:
+    """Load audio file and append/prepend to combined audio.
+
+    Args:
+        audio_path: Path to audio file (MP3/WAV)
+        combined: Existing combined audio
+        prepend: If True, add audio before; if False, add after
+        disabled: If True, skip loading
+        log_name: Name for logging (e.g., "intro", "outro")
+
+    Returns:
+        Tuple of (combined_audio, duration_seconds)
+    """
+    if disabled or not audio_path:
+        return combined, 0.0
+
+    path = Path(audio_path)
+    if not path.exists():
+        # Only warn if user specified a non-default path
+        if audio_path not in ("audio/intro.mp3", "audio/outro.mp3"):
+            logger.warning("%s audio file not found: %s", log_name.title(), audio_path)
+        return combined, 0.0
+
+    require_audio()
+    try:
+        audio = AudioSegment.from_file(str(path))
+        duration_sec = len(audio) / 1000.0
+        if prepend:
+            result = audio + combined
+        else:
+            result = combined + audio
+        logger.info("%s audio added: %s (%.1fs)", log_name.title(), path.name, duration_sec)
+        return result, duration_sec
+    except Exception as err:
+        logger.warning("Failed to load %s audio: %s", log_name, err)
+        return combined, 0.0
+
+
+def export_webvtt(segments: List[Segment], path: Path, time_offset: float = 0.0):
+    """Export segments as WebVTT subtitles.
+
+    Args:
+        segments: List of Segment objects with start/end times
+        path: Output file path
+        time_offset: Seconds to add to all timestamps (e.g., for intro audio)
+    """
+
     def fmt(ts: float) -> str:
         hours = int(ts // 3600)
         minutes = int((ts % 3600) // 60)
@@ -533,7 +789,7 @@ def export_webvtt(segments: List[Segment], path: Path):
         f.write("WEBVTT\n\n")
         for idx, seg in enumerate(segments, 1):
             f.write(f"{idx}\n")
-            f.write(f"{fmt(seg.start)} --> {fmt(seg.end)}\n")
+            f.write(f"{fmt(seg.start + time_offset)} --> {fmt(seg.end + time_offset)}\n")
             speaker = re.sub(r"\s+", "_", seg.speaker.title())
             f.write(f"<v {speaker}>{seg.text}\n\n")
 
@@ -542,34 +798,35 @@ def validate_input_file(file_path: Path) -> None:
     """Validate input file for security and existence."""
     if not file_path.exists():
         raise ValidationError(f"Input file not found: {file_path}")
-    
+
     if not file_path.is_file():
         raise ValidationError(f"Input path is not a file: {file_path}")
-    
+
     # Security: Check file size (prevent extremely large files)
     file_size = file_path.stat().st_size
     max_size = 100 * 1024 * 1024  # 100MB limit
     if file_size > max_size:
         raise ValidationError(f"Input file too large: {file_size:,} bytes (max: {max_size:,})")
-    
+
     # Security: Check file extension
-    allowed_extensions = {'.md', '.txt', '.markdown'}
+    allowed_extensions = {".md", ".txt", ".markdown"}
     if file_path.suffix.lower() not in allowed_extensions:
         raise ValidationError(
-            f"Unsupported file extension: {file_path.suffix}. "
-            f"Allowed: {', '.join(allowed_extensions)}"
+            f"Unsupported file extension: {file_path.suffix}. Allowed: {', '.join(allowed_extensions)}"
         )
-    
+
     # Security: Check file content (basic validation)
     try:
         content = file_path.read_text(encoding="utf-8")
         if not content.strip():
             raise ValidationError("Input file is empty")
-        
+
         # Basic content validation - ensure it's text
         if len(content) > 10_000_000:  # 10M character limit
             raise ValidationError("Input file content too large")
-            
+
+    except ValidationError:
+        raise
     except UnicodeDecodeError:
         raise ValidationError("Input file is not valid UTF-8 text")
     except Exception as err:
@@ -583,21 +840,21 @@ def validate_output_dir(output_dir: Path) -> None:
         resolved_path = output_dir.resolve()
     except Exception as err:
         raise ValidationError(f"Invalid output path: {err}") from err
-    
+
     # Security: Ensure we're not writing to system directories
-    forbidden_patterns = ['/bin', '/sbin', '/usr', '/etc', '/sys', '/proc', '/dev']
+    forbidden_patterns = ["/bin", "/sbin", "/usr", "/etc", "/sys", "/proc", "/dev"]
     resolved_str = str(resolved_path)
-    
+
     for pattern in forbidden_patterns:
         if resolved_str.startswith(pattern):
             raise ValidationError(f"Output directory not allowed: {resolved_path}")
-    
+
     # Security: Check if parent directory exists and is writable
     try:
         parent = resolved_path.parent
         if not parent.exists():
             parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Test write permissions
         test_file = parent / ".write_test"
         test_file.write_text("test")
@@ -610,17 +867,17 @@ def sanitize_filename(filename: str) -> str:
     """Sanitize filename for security."""
     if not filename:
         return "output"
-    
+
     # Remove path separators and dangerous characters
-    dangerous_chars = ['/', '\\', '..', '\0', '|', ';', '&', '$', '`', '(', ')', '[', ']', '{', '}', '<', '>', '"', "'"]
+    dangerous_chars = ["/", "\\", "..", "\0", "|", ";", "&", "$", "`", "(", ")", "[", "]", "{", "}", "<", ">", '"', "'"]
     sanitized = filename
-    
+
     for char in dangerous_chars:
-        sanitized = sanitized.replace(char, '_')
-    
+        sanitized = sanitized.replace(char, "_")
+
     # Remove control characters
-    sanitized = ''.join(char for char in sanitized if ord(char) >= 32)
-    
+    sanitized = "".join(char for char in sanitized if ord(char) >= 32)
+
     # Limit length and ensure it's not empty
     sanitized = sanitized[:100]
     return sanitized or "output"
@@ -630,144 +887,130 @@ def validate_cli_arguments(args) -> None:
     """Validate CLI arguments for security and correctness."""
     if args.pause_ms < 0:
         raise ValidationError("Pause duration must be non-negative")
-    
+
     if args.pause_ms > 10000:  # 10 second limit
         raise ValidationError("Pause duration too long (max: 10,000ms)")
-    
-    if args.supertonic_speed <= 0:
+
+    if args.kokoro_speed <= 0:
         raise ValidationError("Speech speed must be positive")
-    
-    if args.supertonic_speed > 10:  # Reasonable upper limit
+
+    if args.kokoro_speed > 10:  # Reasonable upper limit
         raise ValidationError("Speech speed too high (max: 10.0)")
-    
-    if args.supertonic_steps < 1 or args.supertonic_steps > 100:
-        raise ValidationError("Supertonic steps must be between 1 and 100")
-    
-    # Security: Validate image file if provided
-    if args.image_file:
-        try:
-            validate_image_file(args.image_file)
-        except ValidationError:
-            raise
-        except Exception as err:
-            raise ValidationError(f"Invalid image file: {err}") from err
 
 
-def validate_image_file(image_path: str) -> bool:
-    """Validate that the image file exists and is a supported format."""
-    if not image_path:
-        raise ValidationError("Image path cannot be empty")
-
-    path = Path(image_path)
-    if not path.exists():
-        raise ValidationError(f"Image file not found: {path}")
-
-    supported_formats = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.webp'}
-    if path.suffix.lower() not in supported_formats:
-        raise ValidationError(
-            f"Unsupported image format: {path.suffix}. Supported: {', '.join(supported_formats)}"
-        )
-
-    try:
-        with Image.open(path) as img:
-            img.verify()
-        return True
-    except Exception as err:
-        raise ValidationError(f"Invalid image file {path}: {err}") from err
-
-    path = Path(image_path)
-    if not path.exists():
-        logger.error("Image file not found: %s", path)
-        return False
-
-    supported_formats = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".webp"}
-    if path.suffix.lower() not in supported_formats:
-        logger.error("Unsupported image format: %s. Supported: %s", path.suffix, ", ".join(supported_formats))
-        return False
-
-    try:
-        with Image.open(path) as img:
-            img.verify()
-        return True
-    except Exception as err:
-        logger.error("Invalid image file %s: %s", path, err)
-        return False
-
-
-def create_video_with_static_image(
-    image_path: str, audio_path: Path, output_path: Path, video_format: Literal["mp4", "avi", "mov"] = "mp4"
-) -> bool:
-    """Create a video file by combining a static image with audio using FFmpeg."""
-    if not shutil.which("ffmpeg"):
-        raise DependencyError("ffmpeg not found on PATH – required for video export")
-
-    try:
-        cmd = [
-            "ffmpeg",
-            "-y",  # Overwrite output file
-            "-loop",
-            "1",  # Loop image
-            "-i",
-            image_path,  # Input image
-            "-i",
-            str(audio_path),  # Input audio
-            "-c:v",
-            "libx264",  # Video codec
-            "-tune",
-            "stillimage",  # Optimize for still images
-            "-c:a",
-            "aac",  # Audio codec
-            "-b:a",
-            "192k",  # Audio bitrate
-            "-pix_fmt",
-            "yuv420p",  # Pixel format for compatibility
-            "-shortest",  # Finish when audio ends
-            str(output_path),
-        ]
-
-        subprocess.run(cmd, capture_output=True, text=True, check=True)
-        logger.info("Video exported: %s", output_path)
-        return True
-
-    except subprocess.CalledProcessError as err:
-        raise FFmpegError(f"Video creation failed: {err.stderr}") from err
-    except Exception as err:
-        raise FFmpegError(f"Unexpected error during video creation: {err}") from err
-
-    try:
-        cmd = [
-            "ffmpeg",
-            "-y",  # Overwrite output file
-            "-loop",
-            "1",  # Loop the image
-            "-i",
-            image_path,  # Input image
-            "-i",
-            str(audio_path),  # Input audio
-            "-c:v",
-            "libx264",  # Video codec
-            "-tune",
-            "stillimage",  # Optimize for still images
-            "-c:a",
-            "aac",  # Audio codec
-            "-b:a",
-            "192k",  # Audio bitrate
-            "-pix_fmt",
-            "yuv420p",  # Pixel format for compatibility
-            "-shortest",  # Finish when audio ends
-            str(output_path),
-        ]
-
-        subprocess.run(cmd, capture_output=True, text=True, check=True)
-        logger.info("Video exported: %s", output_path)
-        return True
-
-    except subprocess.CalledProcessError as err:
-        logger.error("Video creation failed: %s", err.stderr)
-        return False
-    except Exception as err:
-        logger.error("Unexpected error during video creation: %s", err)
-        return False
+def parse_cli_args() -> argparse.Namespace:
+    """Build parser and return parsed CLI arguments."""
+    parser = argparse.ArgumentParser(description="Podcast Markdown -> Audio via KOKORO-TTS (US English)")
+    parser.add_argument("input_file", help="Markdown file with dialogue")
+    parser.add_argument("--output-dir", default="output", help="Output directory")
+    parser.add_argument("--output-prefix", default=None, help="Optional base name (default: input stem)")
+    parser.add_argument("--pause-ms", type=int, default=620, help="Base pause between segments (ms, default: 620)")
+    parser.add_argument(
+        "--pause-jitter-ms",
+        type=int,
+        default=170,
+        help="Random jitter added/subtracted from pauses between speakers (ms, default: 170)",
+    )
+    parser.add_argument(
+        "--pause-seed",
+        type=int,
+        default=0,
+        help="Random seed for pause jitter to keep timings reproducible",
+    )
+    parser.add_argument("--mock", action="store_true", help="Force mock (no real synthesis, silence)")
+    parser.add_argument(
+        "--kokoro-voice",
+        default=None,
+        help="Override default male voice (default: am_michael)",
+    )
+    parser.add_argument(
+        "--kokoro-female-voice",
+        default=None,
+        help="Override default female voice (default: af_heart)",
+    )
+    parser.add_argument(
+        "--male-aliases",
+        default=",".join(DEFAULT_MALE_ALIASES),
+        help="Comma-separated speaker names mapped to the default male voice (default: daniel,male,host)",
+    )
+    parser.add_argument(
+        "--female-aliases",
+        default=",".join(DEFAULT_FEMALE_ALIASES),
+        help="Comma-separated speaker names mapped to the default female voice (default: annabelle,female,guest)",
+    )
+    parser.add_argument(
+        "--kokoro-voices-json",
+        default=None,
+        help="JSON mapping speaker names to KOKORO-TTS voices (e.g., am_michael, af_heart)",
+    )
+    parser.add_argument(
+        "--kokoro-speed",
+        type=float,
+        default=1.0,
+        help="Playback speed multiplier for KOKORO-TTS (default: 1.0)",
+    )
+    parser.add_argument(
+        "--kokoro-speeds-json",
+        default=None,
+        help="JSON mapping speaker names to speed multipliers (e.g., 0.99, 1.01)",
+    )
+    parser.add_argument(
+        "--suppress-warnings",
+        action="store_true",
+        default=True,
+        help="Suppress future/deprecation warnings (disable with --no-suppress-warnings)",
+    )
+    parser.add_argument("--no-suppress-warnings", action="store_false", dest="suppress_warnings")
+    parser.add_argument(
+        "--structured-output",
+        action="store_true",
+        default=True,
+        help="Hierarchical layout: <out>/en/<topic> (disable with --no-structured-output)",
+    )
+    parser.add_argument("--no-structured-output", action="store_false", dest="structured_output")
+    parser.add_argument(
+        "--reuse-existing-segments",
+        action="store_true",
+        default=True,
+        help="Reuse existing segment WAVs when present (disable with --no-reuse-existing-segments)",
+    )
+    parser.add_argument(
+        "--no-reuse-existing-segments",
+        action="store_false",
+        dest="reuse_existing_segments",
+    )
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging (DEBUG)")
+    parser.add_argument(
+        "--cache-dir",
+        default=None,
+        help="Directory for audio segment caching (default: <output_dir>/.cache)",
+    )
+    parser.add_argument(
+        "--clear-cache",
+        action="store_true",
+        help="Clear audio cache before synthesis",
+    )
+    parser.add_argument(
+        "--intro-audio",
+        default="audio/intro.mp3",
+        help="Path to intro audio file (default: audio/intro.mp3, auto-detected)",
+    )
+    parser.add_argument(
+        "--outro-audio",
+        default="audio/outro.mp3",
+        help="Path to outro audio file (default: audio/outro.mp3, auto-detected)",
+    )
+    parser.add_argument(
+        "--no-intro",
+        action="store_true",
+        help="Disable automatic intro audio",
+    )
+    parser.add_argument(
+        "--no-outro",
+        action="store_true",
+        help="Disable automatic outro audio",
+    )
+    return parser.parse_args()
 
 
 def main():
@@ -788,139 +1031,7 @@ def main():
         logger.warning("ffmpeg not found on PATH – MP3 export will fail; install ffmpeg to enable MP3 output")
 
     load_dotenv()
-    parser = argparse.ArgumentParser(
-        description="Podcast Markdown -> Audio via Supertonic (English dialogue synthesis)"
-    )
-    parser.add_argument("input_file", help="Markdown file with dialogue")
-    parser.add_argument("--language", "-l", default=DEFAULT_LANGUAGE, help="Language code (en)")
-    parser.add_argument("--output-dir", default="output_supertonic", help="Output directory")
-    parser.add_argument("--output-prefix", default=None, help="Optional base name (default: input stem)")
-    parser.add_argument("--pause-ms", type=int, default=750, help="Base pause between segments (ms)")
-    parser.add_argument(
-        "--pause-jitter-ms",
-        type=int,
-        default=120,
-        help="Random jitter added/subtracted from pauses between speakers (ms, default: 120)",
-    )
-    parser.add_argument(
-        "--pause-seed",
-        type=int,
-        default=0,
-        help="Random seed for pause jitter to keep timings reproducible",
-    )
-    parser.add_argument("--mock", action="store_true", help="Force mock (no real synthesis, silence)")
-    parser.add_argument(
-        "--tts-backend",
-        choices=["supertonic"],
-        default="supertonic",
-        help="TTS backend to use (default: supertonic)",
-    )
-    parser.add_argument(
-        "--supertonic-voice",
-        default=DEFAULT_MALE_VOICE,
-        help="Default Supertonic voice style (e.g., M3)",
-    )
-    parser.add_argument(
-        "--supertonic-female-voice",
-        default=DEFAULT_FEMALE_VOICE,
-        help="Fallback voice style for female speakers (default: F3)",
-    )
-    parser.add_argument(
-        "--male-aliases",
-        default=",".join(DEFAULT_MALE_ALIASES),
-        help="Comma-separated speaker names mapped to the default male voice (default: daniel,male,host)",
-    )
-    parser.add_argument(
-        "--female-aliases",
-        default=",".join(DEFAULT_FEMALE_ALIASES),
-        help="Comma-separated speaker names mapped to the default female voice (default: annabelle,female,guest)",
-    )
-    parser.add_argument(
-        "--supertonic-voices-json",
-        default=None,
-        help="JSON mapping speaker names to Supertonic voice styles (e.g., M3, F3)",
-    )
-    parser.add_argument(
-        "--supertonic-speed",
-        type=float,
-        default=0.93,
-        help="Playback speed multiplier for Supertonic (default: 0.93)",
-    )
-    parser.add_argument(
-        "--supertonic-steps",
-        type=int,
-        default=10,
-        help="Denoising steps for Supertonic (1-100, default: 10)",
-    )
-    parser.add_argument(
-        "--supertonic-max-chars",
-        type=int,
-        default=300,
-        help="Max characters per chunk before Supertonic auto-chunking",
-    )
-    parser.add_argument(
-        "--supertonic-silence-sec",
-        type=float,
-        default=0.15,
-        help="Silence inserted between internal chunks (seconds, default: 0.15)",
-    )
-    parser.add_argument(
-        "--supertonic-speeds-json",
-        default=None,
-        help="JSON mapping speaker names to speed multipliers (e.g., 0.94, 0.92)",
-    )
-    # Output / Struktur-Optionen
-    parser.add_argument(
-        "--suppress-warnings",
-        action="store_true",
-        default=True,
-        help="Suppress future/deprecation warnings (disable with --no-suppress-warnings)",
-    )
-    parser.add_argument("--no-suppress-warnings", action="store_false", dest="suppress_warnings")
-    parser.add_argument(
-        "--structured-output",
-        action="store_true",
-        default=True,
-        help="Hierarchical layout: <out>/<language>/<topic>/(final|segments) " "(disable with --no-structured-output)",
-    )
-    parser.add_argument("--no-structured-output", action="store_false", dest="structured_output")
-    parser.add_argument(
-        "--reuse-existing-segments",
-        action="store_true",
-        default=True,
-        help="Reuse existing segment WAVs when present " "(disable with --no-reuse-existing-segments)",
-    )
-    parser.add_argument(
-        "--no-reuse-existing-segments",
-        action="store_false",
-        dest="reuse_existing_segments",
-    )
-    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging (DEBUG)")
-    
-    # Caching Options
-    parser.add_argument(
-        "--cache-dir",
-        default=None,
-        help="Directory for audio segment caching (default: <output_dir>/.cache)",
-    )
-    parser.add_argument(
-        "--clear-cache",
-        action="store_true",
-        help="Clear audio cache before synthesis",
-    )
-    
-    # Video Export Options
-    parser.add_argument(
-        "--image-file", default=None, help="Path to static image file for video generation (e.g., cover.jpg)"
-    )
-    parser.add_argument(
-        "--export-video", action="store_true", help="Export video file combining static image with audio"
-    )
-    parser.add_argument(
-        "--video-format", default="mp4", choices=["mp4", "avi", "mov"], help="Video format for export (default: mp4)"
-    )
-
-    args = parser.parse_args()
+    args = parse_cli_args()
     if args.verbose:
         logger.setLevel(logging.DEBUG)
 
@@ -931,26 +1042,20 @@ def main():
         logger.error("Validation failed: %s", err)
         return 1
 
-    language = args.language.lower()
-    if language not in SUPPORTED_LANGS:
-        logger.warning(
-            "Language %s untested – falling back to %s",
-            language,
-            DEFAULT_LANGUAGE,
-        )
-        language = DEFAULT_LANGUAGE
+    output_lang = DEFAULT_LANGUAGE
+    logger.info("Using language: %s (%s)", output_lang, DEFAULT_LANGUAGE_NAME)
 
     input_path = Path(args.input_file)
-    
+
     # Security: Validate input file
     try:
         validate_input_file(input_path)
     except ValidationError as err:
         logger.error("Input validation failed: %s", err)
         return 1
-    
+
     output_root = Path(args.output_dir)
-    
+
     # Security: Validate output directory
     try:
         validate_output_dir(output_root)
@@ -971,10 +1076,9 @@ def main():
     # Prepare structured output layout if requested
     if args.structured_output:
         topic = base_name
-        structured_base = output_root / language / topic
-        final_dir = structured_base / "final"
+        final_dir = output_root / output_lang / topic
         final_dir.mkdir(parents=True, exist_ok=True)
-        logger.info("Structured output enabled: %s", structured_base)
+        logger.info("Structured output enabled: %s", final_dir)
     else:
         final_dir = output_root
 
@@ -986,18 +1090,14 @@ def main():
         return 1
     logger.info("%d segments detected", len(segments))
 
-    if args.tts_backend != "supertonic":
-        logger.error("Only the Supertonic backend is supported.")
-        return 1
+    # KOKORO-TTS voice mapping
+    # Only use CLI defaults if explicitly set, otherwise use English defaults.
+    default_voice = args.kokoro_voice  # May be None, use default voice selection.
+    default_female_voice = args.kokoro_female_voice  # May be None
 
-    # Supertonic voice mapping (speaker -> voice style)
-    default_voice = (args.supertonic_voice or DEFAULT_MALE_VOICE).upper()
-    default_female_voice = (args.supertonic_female_voice or DEFAULT_FEMALE_VOICE).upper()
-    if args.supertonic_steps < 1 or args.supertonic_steps > 100:
-        logger.error("--supertonic-steps must be between 1 and 100")
-        return 1
-    if args.supertonic_speed <= 0:
-        logger.error("--supertonic-speed must be positive")
+    # Validation
+    if args.kokoro_speed <= 0:
+        logger.error("--kokoro-speed must be positive")
         return 1
     if args.pause_ms < 0:
         logger.error("--pause-ms must be non-negative")
@@ -1005,20 +1105,14 @@ def main():
     if args.pause_jitter_ms < 0:
         logger.error("--pause-jitter-ms must be >= 0")
         return 1
-    if args.supertonic_max_chars <= 0:
-        logger.error("--supertonic-max-chars must be positive")
-        return 1
-    if args.supertonic_silence_sec < 0:
-        logger.error("--supertonic-silence-sec must be >= 0")
-        return 1
 
     try:
-        supertonic_voice_map = load_speaker_voice_map(args.supertonic_voices_json)
+        kokoro_voice_map = load_speaker_voice_map(args.kokoro_voices_json)
     except (FileNotFoundError, ValueError) as err:
         logger.error("%s", err)
         return 1
     try:
-        supertonic_speed_map = load_speaker_speed_map(args.supertonic_speeds_json)
+        kokoro_speed_map = load_speaker_speed_map(args.kokoro_speeds_json)
     except (FileNotFoundError, ValueError) as err:
         logger.error("%s", err)
         return 1
@@ -1026,42 +1120,40 @@ def main():
     male_aliases = parse_aliases(args.male_aliases, DEFAULT_MALE_ALIASES)
     female_aliases = parse_aliases(args.female_aliases, DEFAULT_FEMALE_ALIASES)
 
+    # Build speaker voice mapping
     speaker_voice_map = build_speaker_mapping(
-        language,
-        supertonic_voice_map,
+        kokoro_voice_map,
         default_male=default_voice,
         default_female=default_female_voice,
         male_aliases=male_aliases,
         female_aliases=female_aliases,
     )
 
-    if not HAS_SUPERTONIC and not args.mock:
-        detail = f" ({SUPERTONIC_IMPORT_ERROR})" if SUPERTONIC_IMPORT_ERROR else ""
-        logger.error(
-            "Supertonic backend unavailable%s. " "Install via `pip install supertonic` or run with --mock.",
-            detail,
-        )
-        return 1
-
     if args.suppress_warnings:
         warnings.filterwarnings("ignore", category=FutureWarning)
         warnings.filterwarnings("ignore", category=DeprecationWarning)
         logger.info("Suppressing future/deprecation warnings (--suppress-warnings)")
 
-    synthesizer = SupertonicSynthesizer(
+    # Initialize KOKORO-TTS synthesizer
+    if not HAS_KOKORO and not args.mock:
+        detail = f" ({KOKORO_IMPORT_ERROR})" if KOKORO_IMPORT_ERROR else ""
+        logger.error(
+            "KOKORO-TTS backend unavailable%s. Install dependencies with `pip install -r requirements.txt`.",
+            detail,
+        )
+        return 1
+
+    synthesizer = KokoroSynthesizer(
         default_voice=default_voice,
-        speed=args.supertonic_speed,
-        total_steps=args.supertonic_steps,
-        max_chunk_length=args.supertonic_max_chars,
-        silence_duration=args.supertonic_silence_sec,
-        mock=args.mock,
+        speed=args.kokoro_speed,
         speaker_voice_map=speaker_voice_map,
-        speaker_speed_map=supertonic_speed_map,
+        speaker_speed_map=kokoro_speed_map,
         cache_dir=cache_dir,
+        mock=args.mock,
     )
 
     if synthesizer.mock and not args.mock:
-        logger.warning("Falling back to mock synthesis. Check Supertonic installation or pass --mock explicitly.")
+        logger.warning("Falling back to mock synthesis. Check KOKORO-TTS installation or pass --mock explicitly.")
 
     assembler = PodcastAssembler(pause_ms=args.pause_ms, pause_jitter_ms=args.pause_jitter_ms, seed=args.pause_seed)
 
@@ -1071,6 +1163,7 @@ def main():
     current_time = 0.0
 
     try:
+        total_segments = len(segments)
         for idx, seg in enumerate(segments):
             logger.debug("Synthesize segment %d (%s) ...", seg.index, seg.speaker)
             audio = synthesizer.synthesize(seg.text, seg.speaker)
@@ -1088,10 +1181,15 @@ def main():
             seg.end = current_time + duration_sec
             current_time = seg.end
             audio_segments.append(audio)
+
+            processed = idx + 1
+            if processed % 25 == 0 or processed == total_segments:
+                progress_pct = (processed / total_segments) * 100
+                logger.info("Synthesis progress: %d/%d (%.1f%%)", processed, total_segments, progress_pct)
     except KeyboardInterrupt:
         logger.warning("Interrupted by user – stopping synthesis early")
         return 1
-    except (SynthesisError, ValidationError, FFmpegError) as err:
+    except (SynthesisError, ValidationError) as err:
         logger.error("Processing failed: %s", err)
         return 1
     except Exception as err:
@@ -1101,35 +1199,20 @@ def main():
     # Assemble final podcast
     combined = assembler.assemble(audio_segments, pauses_ms=pauses_ms)
 
+    # Load and add intro/outro audio (automatic if files exist)
+    combined, intro_duration_sec = load_audio_file(
+        args.intro_audio, combined, prepend=True, disabled=args.no_intro, log_name="intro"
+    )
+    combined, _ = load_audio_file(args.outro_audio, combined, prepend=False, disabled=args.no_outro, log_name="outro")
+
     # Export final assets
     mp3_path = final_dir / f"{base_name}.mp3"
     combined.export(str(mp3_path), format="mp3", bitrate="256k")
     logger.info("MP3 exported: %s (%.1fs)", mp3_path, len(combined) / 1000.0)
 
     vtt_path = final_dir / f"{base_name}.vtt"
-    export_webvtt(segments, vtt_path)
-    logger.info("VTT exported: %s", vtt_path)
-
-    # Video export if requested
-    if args.export_video:
-        if not args.image_file:
-            logger.error("--image-file required when --export-video is specified")
-            return 1
-
-        try:
-            validate_image_file(args.image_file)
-
-            video_path = final_dir / f"{base_name}.{args.video_format}"
-            success = create_video_with_static_image(
-                args.image_file, mp3_path, video_path, args.video_format
-            )
-
-            if not success:
-                logger.error("Video export failed")
-                return 1
-        except (ValidationError, FFmpegError) as err:
-            logger.error("Video processing failed: %s", err)
-            return 1
+    export_webvtt(segments, vtt_path, time_offset=intro_duration_sec)
+    logger.info("VTT exported: %s (offset: +%.1fs for intro)", vtt_path, intro_duration_sec)
 
     return 0
 

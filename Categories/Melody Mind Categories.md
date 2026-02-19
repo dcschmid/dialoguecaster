@@ -4,7 +4,7 @@
 
 ## I. Time, Change & Musical Evolution
 
-### Music Through the Decades
+### Music Through the Decades (Done)
 
 - 1950s — origins, signature sound, key movements, and legacy
 - 1960s — origins, signature sound, key movements, and legacy
@@ -20,7 +20,8 @@
 
 #### Genre Evolution Pathways
 
-- Blues → Rhythm & Blues → Rock ’n’ Roll → Classic Rock → Hard Rock → Metal → Thrash / Death / Black → Metalcore / Deathcore
+- Blues → Rhythm & Blues → Rock ’n’ Roll → Classic Rock → Hard Rock → Metal → Thrash / Death / Black → Metalcore / Deathcore (Done)
+- Classical → Modern Classical → Minimalism → Post-Classical / Neo-Classical
 - Folk → Singer-Songwriter → Indie Folk → Bedroom Pop
 - Gospel → Soul → Contemporary R&B → Modern Vocal Pop
 - Soul → Funk → Disco → House → Modern Dance Music
@@ -34,7 +35,6 @@
 - Electronic → Techno / House → Trance / IDM → EDM → Experimental & Hybrid Forms
 - Ambient → Downtempo → Chillwave → Lo-Fi
 - Country → Honky-Tonk → Outlaw → Americana → Alt-Country / Indie Country
-- Classical → Modern Classical → Minimalism → Post-Classical / Neo-Classical
 - Latin → Salsa → Latin Pop → Reggaeton → Latin Trap / Urban
 - Highlife → Afrobeat → Afrobeats → Afro-Fusion
 

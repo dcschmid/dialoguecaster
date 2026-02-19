@@ -33,8 +33,9 @@ def test_cli_mock_exports_vtt(monkeypatch, tmp_path):
     exit_code = generate_podcast.main()
     assert exit_code == 0
 
-    vtt_path = output_dir / "en" / input_md.stem / "final" / f"{input_md.stem}.vtt"
-    assert vtt_path.exists()
+    # Output path: output_dir / language / topic / {stem}.vtt (structured output is default)
+    vtt_path = output_dir / "en" / input_md.stem / f"{input_md.stem}.vtt"
+    assert vtt_path.exists(), f"VTT not found at {vtt_path}"
 
 
 def test_reuse_existing_segments_skips_new_synthesis(monkeypatch, tmp_path):
@@ -59,14 +60,14 @@ def test_reuse_existing_segments_skips_new_synthesis(monkeypatch, tmp_path):
     )
 
     synth_calls = {"count": 0}
-    original_synthesize = generate_podcast.SupertonicSynthesizer.synthesize
+    original_synthesize = generate_podcast.KokoroSynthesizer.synthesize
 
     def counting_synthesize(self, text, speaker_name):
         synth_calls["count"] += 1
         return original_synthesize(self, text, speaker_name)
 
     monkeypatch.setattr(
-        generate_podcast.SupertonicSynthesizer,
+        generate_podcast.KokoroSynthesizer,
         "synthesize",
         counting_synthesize,
         raising=False,
