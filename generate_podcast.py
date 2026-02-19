@@ -160,12 +160,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger("dialoguecaster")
 
+# =============================================================================
+# Module Constants
+# =============================================================================
+
+# Language configuration (English-only)
 DEFAULT_LANGUAGE = "en"
 DEFAULT_LANGUAGE_NAME = "English (US)"
-DEFAULT_LANG_CODE = "a"
+DEFAULT_LANG_CODE = "a"  # KOKORO-TTS lang_code for American English
 DEFAULT_SAMPLE_RATE = 24000
 MIN_PYTHON = (3, 10, 0)  # Minimum Python version for KOKORO-TTS
 
+# Voice defaults (best quality voices for English)
 BEST_VOICES = {"male": "am_michael", "female": "af_heart"}
 DEFAULT_MALE_VOICE = "am_michael"
 DEFAULT_FEMALE_VOICE = "af_heart"
@@ -198,12 +204,20 @@ class AudioSegmentCache:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_cache_key(self, text: str, speaker: str, voice: str, speed: float) -> str:
-        """Generate cache key based on content and parameters."""
+        """Generate SHA256 cache key from synthesis parameters.
+
+        The key includes all parameters that affect audio output, ensuring
+        cached segments are only reused when they would produce identical audio.
+        """
         content = f"{text}|{speaker}|{voice}|{speed}"
         return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
     def get_cached_segment(self, text: str, speaker: str, voice: str, speed: float) -> Optional[AudioSegmentType]:
-        """Get cached audio segment if available."""
+        """Retrieve cached audio segment if available.
+
+        Returns:
+            AudioSegment if cache hit, None if cache miss or load error.
+        """
         cache_key = self._get_cache_key(text, speaker, voice, speed)
         cache_file = self.cache_dir / f"{cache_key}.wav"
 
@@ -215,7 +229,10 @@ class AudioSegmentCache:
         return None
 
     def cache_segment(self, text: str, speaker: str, voice: str, speed: float, segment: AudioSegmentType) -> None:
-        """Cache an audio segment."""
+        """Cache an audio segment with atomic write for safety.
+
+        Uses temp file + os.replace() to prevent corrupted cache files on crash.
+        """
         if AudioSegment is None:
             return
 
@@ -247,6 +264,16 @@ class AudioSegmentCache:
 
 @dataclass
 class Segment:
+    """Represents a single dialogue segment with timing metadata.
+
+    Attributes:
+        index: 1-based segment position in the dialogue
+        speaker: Speaker name (normalized to lowercase)
+        text: The spoken text content
+        start: Start time in seconds (populated during synthesis)
+        end: End time in seconds (populated during synthesis)
+    """
+
     index: int
     speaker: str
     text: str
@@ -400,7 +427,20 @@ def build_speaker_mapping(
 
 
 def derive_speaker_key(name: str, mapping: Dict[str, str]) -> str:
-    """Pick a voice style for a given speaker name using mapping + simple heuristics."""
+    """Determine voice for a speaker using explicit mapping or gender heuristics.
+
+    Resolution order:
+        1. Exact match in mapping dict
+        2. Gender detection from speaker name markers
+        3. Default to male voice
+
+    Args:
+        name: Speaker name from dialogue script
+        mapping: Speaker-to-voice mapping (from build_speaker_mapping)
+
+    Returns:
+        Voice identifier (e.g., "am_michael", "af_heart")
+    """
     normalized = (name or "").strip().lower()
     male_default = mapping.get("male", mapping.get("_default_male", DEFAULT_MALE_VOICE))
     female_default = mapping.get("female", mapping.get("_default_female", DEFAULT_FEMALE_VOICE))
@@ -420,7 +460,15 @@ def derive_speaker_key(name: str, mapping: Dict[str, str]) -> str:
 
 
 def parse_aliases(raw: Optional[str], defaults: List[str]) -> List[str]:
-    """Convert a comma-separated alias string into a clean list."""
+    """Parse comma-separated alias string into a cleaned list.
+
+    Args:
+        raw: Comma-separated string (e.g., "daniel,male,host") or None
+        defaults: Fallback list if raw is empty/None
+
+    Returns:
+        List of cleaned aliases, or defaults if parsing yields empty list
+    """
     if raw is None:
         return defaults
     aliases: List[str] = []
@@ -695,6 +743,12 @@ class KokoroSynthesizer:
 
 
 class PodcastAssembler:
+    """Assembles individual audio segments into a final podcast track.
+
+    Handles pause insertion with optional random jitter for more natural
+    conversation flow. Uses seeded RNG for reproducible pause patterns.
+    """
+
     def __init__(self, pause_ms: int = 500, pause_jitter_ms: int = 0, seed: int = 0):
         self.pause_ms = pause_ms
         self.pause_jitter_ms = pause_jitter_ms
