@@ -118,7 +118,7 @@ daniel: This change is important in the history of the game. Minimalism is movin
 
 annabelle: But the most important things are still the same. Reduction. Trust. Time is material. Even when minimalism becomes popular, its power comes from the original decision to listen longer than expected. To stay when things seem to be going well. This is a language that two people can share.
 
-daniel: By this point, classical music has fully stopped trying to make progress. It's not about going somewhere new. It's about getting to know yourself better. This is a big change, and it gets us ready for the next step, where the focus is on listening.
+daniel: By this point, classical music has fully stopped trying to make progress. It's not about going somewhere new. It's about getting to know yourself better. This is a big change, and it gets us ready for a phase where the focus is on listening.
 
 annabelle: At a certain point, minimalism stops being something you have to look for. It starts to appear around you. In films, art installations and personal listening spaces. This change is important because the music adapts to it without losing its main character. It becomes quieter and more thoughtful, but still feels connected to the present and to what has happened before.
 

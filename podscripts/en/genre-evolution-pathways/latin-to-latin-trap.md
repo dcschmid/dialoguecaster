@@ -62,7 +62,7 @@ daniel: The sound is complex because of the emotional layers. It's a celebration
 
 annabelle: By the late 1960s, a clear picture was starting to form. Promoters and record labels know that this music can be sold. That's when the term "salsa" becomes popular. But what we just talked about is what makes that packaging possible.
 
-daniel: That's right. Salsa wasn't the first to create rhythm. It named it. Naming something makes it easier for people to see it. It also gives you control. This tension will shape the next chapter when we move into the Fania era.
+daniel: That's right. Salsa wasn't the first to create rhythm. It named it. Naming something makes it easier for people to see it. It also gives you control. This tension carries straight into the Fania era.
 
 annabelle: But before we go there, I think it's important to acknowledge how much was achieved already. Structural innovation. Cultural negotiation. Circuits for touring internationally. These musicians created a type of music that sounded international, even though the conditions weren't always stable.
 
@@ -70,7 +70,7 @@ daniel: They did it without knowing that decades later, reggaeton would use thei
 
 annabelle: That's what makes this foundation so powerful. It wasn't built for branding. It was built for survival, community, and expression. That same authenticity is still there.
 
-daniel: As we move forward to the next step, which is salsa, we continue to be aware of this concept. The genre label comes later. The heartbeat comes first.
+daniel: As we move into salsa, we continue to be aware of this concept. The genre label comes later. The heartbeat comes first.
 
 annabelle: And that heartbeat is still there. If you look closely at how modern Latin trap is produced, you can still see the rhythmic origins. It's not straightforward. It's a cycle.
 
@@ -464,13 +464,13 @@ annabelle: And risk is what makes Latin trap music move forward.
 
 daniel: Trap and reggaeton are similar. It soaks it up. It makes it softer. It makes it darker. It makes room for thoughts in the mind of the character.
 
-annabelle: This change feels like the next step in a long process of change.
+annabelle: This change feels like another turn in a long process of change.
 
 daniel: From dancing as a group to thinking about your own life.
 
 annabelle: It goes from the first song to the song that introduces the band.
 
-daniel: That's where we're going next.
+daniel: That's where this thread leads.
 
 annabelle: When Latin trap started to become popular in the mid-2010s, it didn't seem like a big change. It feels quieter. Slower. The rhythm of the music is still there, but there are more gaps between the beats.
 
@@ -551,4 +551,3 @@ daniel: Until the present moment feels both new and familiar at the same time.
 annabelle: Before we let the room go quiet again, we just want to say thank you for listening so closely with us. To be present and give the music time instead of rushing through it. These journeys are only possible when someone is on the other side, listening with patience. It means more than we usually say.
 
 daniel: Yes, thank you for sharing your attention with us. No matter where you are or how you listened, we hope the rhythm stays with you. It's not about teaching a lesson or feeling nostalgic. It's about keeping it alive. Take care of yourselves and those moments when listening is enough.
-

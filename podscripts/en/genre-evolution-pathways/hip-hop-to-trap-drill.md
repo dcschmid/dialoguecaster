@@ -134,7 +134,7 @@ daniel: What surprises me is how quickly hip hop becomes commonplace during this
 
 annabelle: But being recognized also means being judged. Many news outlets often paint rap as dangerous or disruptive. This tension affects the artist's approach. When a culture is criticized, it often becomes more defensive. Old-school artists become clearer about who they are and who they're not.
 
-daniel: This clarity is the foundation for the next step, which will be more complex. When minimalism becomes popular, it allows for experimentation. But first, it was important that the identity be stable. Run-D.M.C. and LL Cool J are two of the artists who helped build that foundation.
+daniel: This clarity is the foundation for a more complex phase. When minimalism becomes popular, it allows for experimentation. But first, it was important that the identity be stable. Run-D.M.C. and LL Cool J are two of the artists who helped build that foundation.
 
 annabelle: Yes, they show that hip hop can fill concert venues, sell a lot of records, and negotiate contracts while still maintaining their unique sound. Finding the right balance between growth and integrity is always a challenge. And we're only at the beginning of that negotiation.
 
@@ -426,7 +426,7 @@ daniel: In hindsight, it seems like a period of disorder with a bit of structure
 
 annabelle: It's important to understand yourself. The digital shift would have caused a permanent divide in culture if it hadn't been for it. Instead, hip hop adapts. It learns new technologies and new regional energies.
 
-daniel: So what we're seeing here isn't decline or division. It's a time of change. It's painful, complicated, but it's also a time of change. The next chapter won't erase what came before. It will reinterpret it.
+daniel: So what we're seeing here isn't decline or division. It's a time of change. It's painful, complicated, but it's also a time of change. What follows won't erase what came before. It will reinterpret it.
 
 annabelle: Yes, the South will never forget its rich musical history. It will change the way rhythm works. It will change the way stories are told. It will also create new ways for music to be shared that will change the current economic models.
 
